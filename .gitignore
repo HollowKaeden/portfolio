@@ -1,0 +1,48 @@
+# Claude Code
+CLAUDE.md
+.claude/
+
+# Секреты и окружение (.env.example коммитится)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Astro / Node (site/)
+node_modules/
+dist/
+.astro/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+
+# Бэкапы и дампы БД (backup.sh)
+backups/
+*.sql.gz
+*.dump
+*.tar.gz
+
+# Локальные данные docker compose
+deploy/data/
+deploy/volumes/
+
+# Логи и временные файлы
+*.log
+*.tmp
+tmp/
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# ОС
+.DS_Store
+Thumbs.db
+desktop.ini
