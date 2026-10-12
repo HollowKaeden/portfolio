@@ -6,6 +6,10 @@ name: givemeanoffer
 # - db: внутренняя, только приложения и Postgres; Caddy в неё не входит, наружу выхода нет.
 x-caddy-ip: &caddy-ip 172.30.0.2
 
+# Образы: маленькие (сайт, BookReviews) в ghcr; Фудграм в Docker Hub, потому что ghcr
+# с сервера в России качается в ~150 раз медленнее, а образы Фудграма большие.
+# Логин Docker Hub: FOODGRAM_IMAGE_PREFIX=docker.io/<логин> в .env.
+
 services:
   caddy:
     image: ghcr.io/hollowkaeden/portfolio:${PORTFOLIO_TAG:-latest}
@@ -82,7 +86,7 @@ services:
       - db
 
   foodgram-backend:
-    image: ghcr.io/hollowkaeden/foodgram-backend:${FOODGRAM_TAG:-latest}
+    image: ${FOODGRAM_IMAGE_PREFIX:?задайте FOODGRAM_IMAGE_PREFIX в .env}/foodgram-backend:${FOODGRAM_TAG:-latest}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -131,7 +135,7 @@ services:
 
   # nginx: сборка React, статика Django, медиа; /api/, /admin/, /s/ проксирует на foodgram-backend
   foodgram-gateway:
-    image: ghcr.io/hollowkaeden/foodgram-gateway:${FOODGRAM_TAG:-latest}
+    image: ${FOODGRAM_IMAGE_PREFIX}/foodgram-gateway:${FOODGRAM_TAG:-latest}
     restart: unless-stopped
     depends_on:
       - foodgram-backend
