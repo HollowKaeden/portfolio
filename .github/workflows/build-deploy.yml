@@ -1,15 +1,24 @@
-name: deploy
+name: build-deploy
 
+# Один workflow на всё:
+# - push в main: собрать образ сайта → задеплоить;
+# - вручную или сигнал из пет-проекта (их образы обновились): сборку сайта пропустить, сразу задеплоить.
 on:
-  # после сборки образа сайта (из build.yml); на push отдельно не запускается
-  workflow_call:
-  # передеплой из пет-проектов после пуша их образов
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - deploy/**
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/**
+  workflow_dispatch:
   repository_dispatch:
     types: [deploy]
-  workflow_dispatch:
 
+# Прогоны идут строго по очереди: деплой не прерывается на середине.
 concurrency:
-  group: deploy
+  group: build-deploy
   cancel-in-progress: false
 
 env:
@@ -17,7 +26,48 @@ env:
   DOMAIN: ${{ vars.DOMAIN || 'givemeanoffer.ru' }}
 
 jobs:
+  build:
+    # Образ сайта меняется только от коммитов в этот репозиторий.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/hollowkaeden/portfolio
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: DOMAIN=${{ env.DOMAIN }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
+    needs: build
+    # always() нужен, чтобы деплой запускался и когда build пропущен (ручной запуск, сигнал из проекта).
+    # При упавшей сборке деплоя нет.
+    if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
