@@ -1,0 +1,32 @@
+name: givemeanoffer
+
+services:
+  caddy:
+    image: ghcr.io/hollowkaeden/portfolio:${PORTFOLIO_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?задайте DOMAIN в .env}
+    volumes:
+      # папка, а не файл: при замене файла rsync-ом bind-mount файла показывал бы старую версию
+      - ./caddy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 128m
+    networks:
+      web:
+        # loadgen ходит на сайты по настоящим https-адресам через внутреннюю сеть
+        aliases:
+          - ${DOMAIN}
+          - books.${DOMAIN}
+          - foodgram.${DOMAIN}
+
+volumes:
+  caddy_data: # сертификаты, терять нельзя: Let's Encrypt ограничивает перевыпуск
+  caddy_config:
+
+networks:
+  web:
