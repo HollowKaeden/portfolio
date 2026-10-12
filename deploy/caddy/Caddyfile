@@ -37,3 +37,12 @@ books.{$DOMAIN} {
 	}
 	reverse_proxy bookreviews:8000
 }
+
+# Фудграм. Картинки приходят base64 в JSON: файл до 5 МБ даёт тело около 7 МБ.
+foodgram.{$DOMAIN} {
+	import common
+	request_body {
+		max_size 10MB
+	}
+	reverse_proxy foodgram-gateway:80
+}

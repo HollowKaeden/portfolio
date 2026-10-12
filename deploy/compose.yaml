@@ -39,6 +39,7 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
       BOOKREVIEWS_DB_PASSWORD: ${BOOKREVIEWS_DB_PASSWORD:?задайте BOOKREVIEWS_DB_PASSWORD в .env}
+      FOODGRAM_DB_PASSWORD: ${FOODGRAM_DB_PASSWORD:?задайте FOODGRAM_DB_PASSWORD в .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -80,11 +81,72 @@ services:
       - proxy
       - db
 
+  foodgram-backend:
+    image: ghcr.io/hollowkaeden/foodgram-backend:${FOODGRAM_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # миграции при старте; gunicorn 3 воркера (2 x CPU + 1)
+    command: >-
+      sh -c "python manage.py migrate --noinput &&
+      exec gunicorn foodgram_backend.wsgi:application --bind 0.0.0.0:8000
+      --workers 3 --access-logfile -"
+    environment:
+      POSTGRES_DB: foodgram
+      POSTGRES_USER: foodgram
+      POSTGRES_PASSWORD: ${FOODGRAM_DB_PASSWORD}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      SECRET_KEY: ${FOODGRAM_SECRET_KEY:?задайте FOODGRAM_SECRET_KEY в .env}
+      DEBUG: "False"
+      ALLOWED_HOSTS: foodgram.${DOMAIN}
+      CSRF_TRUSTED_ORIGINS: foodgram.${DOMAIN} # в Django 3.2 без схемы
+      # за Caddy: https и хост из X-Forwarded-*, IP клиента из X-Forwarded-For (один прокси)
+      SECURE_PROXY_SSL_HEADER: "True"
+      USE_X_FORWARDED_HOST: "True"
+      NUM_PROXIES: 1
+      # троттлинг только регистрации и логина; GET-ручки без лимита (их нагружает loadgen)
+      REGISTER_THROTTLE_RATE: 5/hour
+      LOGIN_THROTTLE_RATE: 10/minute
+      # картинки грузят незнакомые люди, диск 30 ГБ
+      MAX_IMAGE_SIZE_MB: 5
+    volumes:
+      - foodgram_media:/app/media
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(urllib.request.Request(
+          'http://localhost:8000/api/recipes/?limit=1',
+          headers={'Host': 'foodgram.${DOMAIN}'})).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 384m
+    networks:
+      - proxy
+      - db
+
+  # nginx: сборка React, статика Django, медиа; /api/, /admin/, /s/ проксирует на foodgram-backend
+  foodgram-gateway:
+    image: ghcr.io/hollowkaeden/foodgram-gateway:${FOODGRAM_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - foodgram-backend
+    volumes:
+      - foodgram_media:/media:ro
+    mem_limit: 64m
+    networks:
+      - proxy
+
 volumes:
   caddy_data: # сертификаты, терять нельзя: Let's Encrypt ограничивает перевыпуск
   caddy_config:
   postgres_data: # БД всех проектов, в бэкапе
   bookreviews_uploads: # обложки книг, в бэкапе
+  foodgram_media: # картинки рецептов и аватары; во внешний бэкап не идут (только дамп БД)
 
 networks:
   proxy:

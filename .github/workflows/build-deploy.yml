@@ -96,6 +96,10 @@ jobs:
             cd $APP_DIR
             test -f .env || { echo 'нет $APP_DIR/.env, скопируйте из .env.example'; exit 1; }
             docker compose pull --quiet
+            # Сначала Postgres и роли/БД проектов: init-скрипт сам по себе выполняется
+            # только на пустом volume, а новые проекты добавляются на живой сервер.
+            docker compose up -d --wait postgres
+            docker compose exec -T postgres sh /docker-entrypoint-initdb.d/10-databases.sh
             docker compose up -d --remove-orphans
             # Caddyfile мог поменяться без пересоздания контейнера
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
@@ -115,6 +119,8 @@ jobs:
           check "https://www.$DOMAIN/" 301
           check "https://books.$DOMAIN/health" 200
           check "https://books.$DOMAIN/ready" 200   # заодно проверяет связь с БД
+          check "https://foodgram.$DOMAIN/" 200
+          check "https://foodgram.$DOMAIN/api/recipes/?limit=1" 200
 
       - name: Logs on failure
         if: failure()
