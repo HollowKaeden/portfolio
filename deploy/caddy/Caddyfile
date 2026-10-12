@@ -13,8 +13,18 @@
 
 {$DOMAIN} {
 	import common
-	root * /srv/site
-	file_server
+
+	# API формы нагрузки на том же домене, что и сайт: CORS не нужен.
+	# handle_path срезает /loadgen/api, сервис видит /status, /run и т.д.
+	# SSE (/run/{id}/events) Caddy проксирует без буферизации сам.
+	handle_path /loadgen/api/* {
+		reverse_proxy loadgen-web:8080
+	}
+
+	handle {
+		root * /srv/site
+		file_server
+	}
 
 	# Файлы Astro с хешем в имени можно кешировать навсегда.
 	header /_astro/* Cache-Control "public, max-age=31536000, immutable"

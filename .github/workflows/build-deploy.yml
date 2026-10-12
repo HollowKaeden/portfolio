@@ -106,6 +106,8 @@ jobs:
             docker compose up -d --remove-orphans
             # Caddyfile мог поменяться без пересоздания контейнера
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+            # loadgen-web читает targets.json только при старте (max_rps мог поменяться)
+            docker compose restart loadgen-web
             docker image prune -f >/dev/null"
 
       - name: Health
@@ -124,6 +126,7 @@ jobs:
           check "https://books.$DOMAIN/ready" 200   # заодно проверяет связь с БД
           check "https://foodgram.$DOMAIN/" 200
           check "https://foodgram.$DOMAIN/api/recipes/?limit=1" 200
+          check "https://$DOMAIN/loadgen/api/status" 200
 
       - name: Logs on failure
         if: failure()

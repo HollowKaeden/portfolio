@@ -145,6 +145,28 @@ services:
     networks:
       - proxy
 
+  # Форма нагрузки на сайте: API под /loadgen/api/ (префикс срезает Caddy).
+  # Цели ходит по настоящим https-адресам: в сети proxy они указывают на Caddy (алиасы выше),
+  # поэтому мерится вся цепочка TLS -> прокси -> приложение -> БД, без выхода в интернет.
+  loadgen-web:
+    image: ghcr.io/hollowkaeden/loadgen-web:${LOADGEN_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      TARGETS: /config/targets.json
+      TRUSTED_PROXY: *caddy-ip # IP посетителя из X-Forwarded-For только от Caddy
+      LISTEN: ":8080"
+    volumes:
+      - ./loadgen:/config:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/status"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    mem_limit: 128m
+    networks:
+      - proxy
+
 volumes:
   caddy_data: # сертификаты, терять нельзя: Let's Encrypt ограничивает перевыпуск
   caddy_config:

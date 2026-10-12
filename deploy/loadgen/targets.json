@@ -1,0 +1,22 @@
+{
+  "targets": [
+    {
+      "id": "portfolio-home",
+      "title": "Главная этого сайта",
+      "url": "https://{domain}/",
+      "max_rps": 0
+    },
+    {
+      "id": "books-list",
+      "title": "BookReviews: список книг (API)",
+      "url": "https://books.{domain}/api/books",
+      "max_rps": 0
+    },
+    {
+      "id": "foodgram-recipes",
+      "title": "Фудграм: список рецептов (API)",
+      "url": "https://foodgram.{domain}/api/recipes/",
+      "max_rps": 0
+    }
+  ]
+}
