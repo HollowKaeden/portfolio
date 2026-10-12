@@ -1,0 +1,46 @@
+---
+import '@fontsource/source-code-pro/400.css';
+import '@fontsource/source-code-pro/500.css';
+import '../styles/global.css';
+import { getSite } from '../lib/content';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const { meta } = await getSite();
+const title = Astro.props.title ? `${Astro.props.title} · ${meta.title}` : meta.title;
+const description = Astro.props.description ?? meta.description;
+---
+
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#171717" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main class="column">
+      <slot />
+    </main>
+  </body>
+</html>
+
+<style>
+  .column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--card-gap);
+    width: min(var(--column), 100% - 2 * var(--page-gutter));
+    margin: 0 auto;
+    padding: var(--page-top) 0 var(--page-top);
+  }
+</style>

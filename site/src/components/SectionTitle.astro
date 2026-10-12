@@ -1,0 +1,14 @@
+---
+interface Props {
+  id: string;
+}
+---
+
+<h2 id={Astro.props.id}><slot /></h2>
+
+<style>
+  h2 {
+    font: var(--text-title);
+    text-transform: uppercase;
+  }
+</style>

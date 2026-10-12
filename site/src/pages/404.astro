@@ -1,0 +1,32 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Card from '../components/Card.astro';
+---
+
+<Layout title="Страница не найдена">
+  <Card class="nf">
+    <a class="back" href="/">← На главную</a>
+    <h1 class="title">404: такой страницы нет</h1>
+  </Card>
+</Layout>
+
+<style>
+  .nf {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 48px;
+    min-height: 200px;
+    padding-top: 16px;
+  }
+
+  .back {
+    font: var(--text-nav);
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .title {
+    font: var(--text-title);
+  }
+</style>

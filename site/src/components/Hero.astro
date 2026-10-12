@@ -1,0 +1,86 @@
+---
+import Card from './Card.astro';
+import Globe from './globe.svg';
+import { getSite, isExternal } from '../lib/content';
+
+const { profile } = await getSite();
+---
+
+<Card class="hero">
+  <header class="top">
+    <nav aria-label="Ссылки">
+      <ul class="links">
+        {
+          profile.links.map((l) => (
+            <li>
+              <a href={l.url} {...(isExternal(l.url) ? { target: '_blank', rel: 'noopener' } : {})}>
+                {l.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+    <p class="location">
+      <Globe class="globe" />
+      <span>{profile.location}</span>
+    </p>
+  </header>
+  <h1 class="greeting">{profile.greeting}</h1>
+</Card>
+
+<style>
+  .hero {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 48px;
+    min-height: 304px;
+    padding-top: 16px;
+  }
+
+  .top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 16px;
+  }
+
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font: var(--text-nav);
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .location {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: var(--text-meta);
+    text-transform: uppercase;
+  }
+
+  .globe {
+    flex: none;
+  }
+
+  .greeting {
+    font: var(--text-title);
+    white-space: pre-line; /* переносы строк из site.yaml */
+  }
+
+  @media (max-width: 559px) {
+    .hero {
+      min-height: 240px;
+    }
+
+    /* на узком экране строки всё равно переносятся, ручные переносы только мешают */
+    .greeting {
+      white-space: normal;
+    }
+  }
+</style>

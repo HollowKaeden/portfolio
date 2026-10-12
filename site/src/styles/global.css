@@ -1,0 +1,113 @@
+/* Значения из design/tokens.md */
+:root {
+  --color-bg: #171717;
+  --color-surface: #ffffff;
+  --color-text: #282828;
+  --color-muted: rgb(40 40 40 / 0.5);
+  --color-thumb: #313131;
+  --color-tag: rgb(40 40 40 / 0.06);
+
+  --font-mono: 'Source Code Pro', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --tracking: -0.04em;
+  --lh-tight: 0.97; /* как в макете; для однострочных подписей и заголовков */
+  --lh-text: 1.2;
+  --lh-title: 1.05; /* для текста, который переносится на несколько строк */
+
+  --text-title: 500 20px / var(--lh-title) var(--font-mono);
+  --text-nav: 500 16px / normal var(--font-mono);
+  --text-meta: 500 16px / var(--lh-tight) var(--font-mono);
+  --text-body: 400 16px / var(--lh-text) var(--font-mono);
+  --text-sub: 400 15px / var(--lh-text) var(--font-mono);
+  --text-caption: 400 12px / var(--lh-tight) var(--font-mono);
+
+  --column: 528px;
+  --page-top: 39px;
+  --page-gutter: 16px;
+  --card-gap: 17px;
+  --card-radius: 15px;
+  --card-pad-x: 16px;
+  --card-pad-y: 20px;
+
+  --thumb-size: 64px;
+  --thumb-radius: 7px;
+  --thumb-gap: 12px;
+  /* линия, на которой стоит текст в «Проектах» и «Достижениях» */
+  --content-indent: calc(var(--thumb-size) + var(--thumb-gap));
+
+  /* соединитель между карточками */
+  --bridge-inset: 83px;
+  --bridge-notch: 8.5px;
+}
+
+@media (max-width: 559px) {
+  :root {
+    --page-top: 16px;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: var(--text-body);
+  letter-spacing: var(--tracking);
+  /* длинное слово не должно вылезать за карточку */
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 559px) {
+  body {
+    hyphens: auto;
+  }
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+a:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+.muted {
+  color: var(--color-muted);
+}

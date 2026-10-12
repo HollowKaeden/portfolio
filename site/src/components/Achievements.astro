@@ -1,0 +1,75 @@
+---
+import Card from './Card.astro';
+import SectionTitle from './SectionTitle.astro';
+import { getAchievementsByYear } from '../lib/content';
+
+const years = await getAchievementsByYear();
+---
+
+{
+  years.length > 0 && (
+    <Card aria-labelledby="achievements">
+      <SectionTitle id="achievements">Достижения</SectionTitle>
+      <div class="years">
+        {years.map(({ year, items }) => (
+          <section class="year" aria-label={String(year)}>
+            <p class="year-label muted">{year}</p>
+            <ul class="items">
+              {items.map((a) => (
+                <li class="item">
+                  <h3 class="title">{a.title}</h3>
+                  {a.description && <p class="description muted">{a.description}</p>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+<style>
+  .years {
+    display: flex;
+    flex-direction: column;
+    gap: 47px;
+    margin-top: 14px;
+  }
+
+  .year {
+    display: grid;
+    grid-template-columns: var(--content-indent) minmax(0, 1fr);
+  }
+
+  .year-label {
+    font: var(--text-caption);
+  }
+
+  .items {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 4px;
+  }
+
+  .title {
+    font: var(--text-title);
+  }
+
+  .description {
+    font: var(--text-body);
+  }
+
+  @media (max-width: 559px) {
+    .year {
+      grid-template-columns: 44px minmax(0, 1fr);
+    }
+  }
+</style>

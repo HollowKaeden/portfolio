@@ -1,0 +1,80 @@
+---
+import Card from './Card.astro';
+import SectionTitle from './SectionTitle.astro';
+import Tags from './Tags.astro';
+import { getProjects, projectPath } from '../lib/content';
+
+const projects = await getProjects();
+---
+
+<Card aria-labelledby="projects">
+  <SectionTitle id="projects">Проекты</SectionTitle>
+  <ul class="list">
+    {
+      projects.map((p) => (
+        <li class="project">
+          {p.preview ? (
+            <img class="thumb" src={p.preview} alt="" width="64" height="64" loading="lazy" />
+          ) : (
+            <div class="thumb" aria-hidden="true" />
+          )}
+          <div class="body">
+            <h3 class="title">
+              <a href={projectPath(p.slug)}>{p.title}</a>
+            </h3>
+            <p class="summary muted">{p.summary}</p>
+            <Tags items={p.stack} />
+          </div>
+        </li>
+      ))
+    }
+  </ul>
+</Card>
+
+<style>
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 18px;
+  }
+
+  .project {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--thumb-size) 1fr;
+    gap: var(--thumb-gap);
+    align-items: start;
+  }
+
+  .thumb {
+    width: var(--thumb-size);
+    height: var(--thumb-size);
+    border-radius: var(--thumb-radius);
+    background: var(--color-thumb);
+    object-fit: cover;
+  }
+
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 6px;
+    min-width: 0;
+  }
+
+  .title {
+    font: var(--text-title);
+  }
+
+  /* вся строка кликабельна */
+  .title a::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  .summary {
+    font: var(--text-sub);
+  }
+</style>

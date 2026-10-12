@@ -1,0 +1,125 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Card from '../../components/Card.astro';
+import SectionTitle from '../../components/SectionTitle.astro';
+import Tags from '../../components/Tags.astro';
+import { demoUrl, getProjects, type Project } from '../../lib/content';
+
+export async function getStaticPaths() {
+  const projects = await getProjects();
+  return projects.map((project) => ({ params: { slug: project.slug }, props: { project } }));
+}
+
+interface Props {
+  project: Project;
+}
+
+const { project } = Astro.props;
+const demo = project.demo;
+const demoHref = demo && demoUrl(demo);
+---
+
+<Layout title={project.title} description={project.summary}>
+  <Card class="head">
+    <nav aria-label="Навигация">
+      <a class="back" href="/">← На главную</a>
+    </nav>
+    <div class="intro">
+      <h1 class="title">{project.title}</h1>
+      <p class="summary muted">{project.summary}</p>
+    </div>
+  </Card>
+
+  <Card aria-labelledby="about">
+    <SectionTitle id="about">О проекте</SectionTitle>
+    <div class="about">
+      {project.description && <p class="description">{project.description}</p>}
+      <Tags items={project.stack} />
+      <ul class="actions">
+        {
+          demoHref && (
+            <li>
+              <a href={demoHref} target="_blank" rel="noopener">
+                Открыть демо ↗
+              </a>
+            </li>
+          )
+        }
+        {
+          project.repo && (
+            <li>
+              <a href={project.repo} target="_blank" rel="noopener">
+                Код на GitHub ↗
+              </a>
+            </li>
+          )
+        }
+      </ul>
+    </div>
+  </Card>
+
+  {
+    demo?.type === 'loadgen-form' && (
+      <Card aria-labelledby="loadgen">
+        <SectionTitle id="loadgen">Нагрузить сайт</SectionTitle>
+        <p class="placeholder muted">Форма запуска появится здесь.</p>
+      </Card>
+    )
+  }
+</Layout>
+
+<style>
+  .head {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 48px;
+    min-height: 200px;
+    padding-top: 16px;
+  }
+
+  .back {
+    font: var(--text-nav);
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .intro {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .title {
+    font: var(--text-title);
+  }
+
+  .summary {
+    font: var(--text-sub);
+  }
+
+  .about {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 18px;
+  }
+
+  .description {
+    font: var(--text-body);
+    line-height: 1.35;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    font: var(--text-nav);
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .placeholder {
+    margin-top: 18px;
+  }
+</style>

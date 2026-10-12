@@ -1,0 +1,36 @@
+---
+// Белая карточка. Каждая следующая карточка «пришита» к предыдущей перемычкой (см. design/tokens.md).
+interface Props {
+  class?: string;
+  'aria-labelledby'?: string;
+}
+const { class: className, ...attrs } = Astro.props;
+---
+
+<section class:list={['card', className]} {...attrs}>
+  <slot />
+</section>
+
+<style>
+  .card {
+    position: relative;
+    background: var(--color-surface);
+    border-radius: var(--card-radius);
+    padding: var(--card-pad-y) var(--card-pad-x);
+  }
+
+  /* Перемычка в зазоре над карточкой: белая полоса, концы вырезаны полукругами цвета фона.
+     Заходит на 1px в обе карточки, чтобы не было щели при дробных пикселях. */
+  .card + .card::before {
+    content: '';
+    position: absolute;
+    left: var(--bridge-inset);
+    right: var(--bridge-inset);
+    top: calc(-1 * var(--card-gap) - 1px);
+    height: calc(var(--card-gap) + 2px);
+    background:
+      radial-gradient(circle at 0 50%, var(--color-bg) var(--bridge-notch), transparent calc(var(--bridge-notch) + 0.5px)),
+      radial-gradient(circle at 100% 50%, var(--color-bg) var(--bridge-notch), transparent calc(var(--bridge-notch) + 0.5px)),
+      var(--color-surface);
+  }
+</style>
