@@ -1,13 +1,17 @@
 name: build
 
+# Единая цепочка для любого push: сборка образа → деплой.
+# Правка только deploy/ тоже пересобирает образ: с кешем это около минуты,
+# зато деплой никогда не стартует раньше, чем образ готов.
 on:
   push:
     branches: [main]
     paths:
       - site/**
+      - deploy/**
       - Dockerfile
       - .dockerignore
-      - .github/workflows/build.yml
+      - .github/workflows/**
   workflow_dispatch:
 
 concurrency:

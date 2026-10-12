@@ -1,14 +1,8 @@
 name: deploy
 
 on:
-  # после сборки образа сайта (из build.yml)
+  # после сборки образа сайта (из build.yml); на push отдельно не запускается
   workflow_call:
-  # правки конфигурации деплоя, образы не меняются
-  push:
-    branches: [main]
-    paths:
-      - deploy/**
-      - .github/workflows/deploy.yml
   # передеплой из пет-проектов после пуша их образов
   repository_dispatch:
     types: [deploy]
@@ -37,7 +31,7 @@ jobs:
           cat >> ~/.ssh/config <<CFG
           Host vps
             HostName ${{ secrets.VPS_HOST }}
-            User ${{ secrets.VPS_USER }}
+            User ${{ vars.VPS_USER }}
             IdentityFile ~/.ssh/id_ed25519
             StrictHostKeyChecking yes
           CFG
