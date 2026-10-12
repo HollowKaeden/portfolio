@@ -28,3 +28,12 @@
 www.{$DOMAIN} {
 	redir https://{$DOMAIN}{uri} permanent
 }
+
+# BookReviews. Само приложение ограничивает обложку 5 МБ, здесь запас на multipart.
+books.{$DOMAIN} {
+	import common
+	request_body {
+		max_size 6MB
+	}
+	reverse_proxy bookreviews:8000
+}

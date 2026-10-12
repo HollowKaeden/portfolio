@@ -113,6 +113,8 @@ jobs:
           }
           check "https://$DOMAIN/" 200
           check "https://www.$DOMAIN/" 301
+          check "https://books.$DOMAIN/health" 200
+          check "https://books.$DOMAIN/ready" 200   # заодно проверяет связь с БД
 
       - name: Logs on failure
         if: failure()

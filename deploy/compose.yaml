@@ -1,5 +1,11 @@
 name: givemeanoffer
 
+# Сети:
+# - proxy: Caddy и приложения за ним. У Caddy фиксированный адрес, чтобы приложения
+#   доверяли X-Forwarded-* только от него (FORWARDED_ALLOW_IPS и аналоги).
+# - db: внутренняя, только приложения и Postgres; Caddy в неё не входит, наружу выхода нет.
+x-caddy-ip: &caddy-ip 172.30.0.2
+
 services:
   caddy:
     image: ghcr.io/hollowkaeden/portfolio:${PORTFOLIO_TAG:-latest}
@@ -17,16 +23,73 @@ services:
       - caddy_config:/config
     mem_limit: 128m
     networks:
-      web:
+      proxy:
+        ipv4_address: *caddy-ip
         # loadgen ходит на сайты по настоящим https-адресам через внутреннюю сеть
         aliases:
           - ${DOMAIN}
           - books.${DOMAIN}
           - foodgram.${DOMAIN}
 
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    # Под 1 vCPU / 2 ГБ: небольшой буфер и мало соединений (uvicorn 1 воркер, gunicorn 3).
+    command: postgres -c shared_buffers=128MB -c max_connections=40
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      BOOKREVIEWS_DB_PASSWORD: ${BOOKREVIEWS_DB_PASSWORD:?задайте BOOKREVIEWS_DB_PASSWORD в .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 384m
+    networks:
+      - db
+
+  bookreviews:
+    image: ghcr.io/hollowkaeden/bookreviews:${BOOKREVIEWS_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://bookreviews:${BOOKREVIEWS_DB_PASSWORD}@postgres:5432/bookreviews
+      ADMIN_USERNAME: ${BOOKREVIEWS_ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${BOOKREVIEWS_ADMIN_PASSWORD:?задайте BOOKREVIEWS_ADMIN_PASSWORD в .env}
+      UPLOAD_DIR: /app/uploads
+      # uvicorn читает эту переменную сам: X-Forwarded-* принимаются только от Caddy
+      FORWARDED_ALLOW_IPS: *caddy-ip
+    volumes:
+      - bookreviews_uploads:/app/uploads
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 256m
+    networks:
+      - proxy
+      - db
+
 volumes:
   caddy_data: # сертификаты, терять нельзя: Let's Encrypt ограничивает перевыпуск
   caddy_config:
+  postgres_data: # БД всех проектов, в бэкапе
+  bookreviews_uploads: # обложки книг, в бэкапе
 
 networks:
-  web:
+  proxy:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  db:
+    internal: true
