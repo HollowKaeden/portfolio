@@ -68,7 +68,10 @@ if ! restic cat config >/dev/null 2>&1; then
   restic init
 fi
 
-restic backup --quiet --tag daily /data/db /data/bookreviews_uploads
+# tar обложек нужен только локально: во внешнюю копию обложки идут файлами прямо из volume,
+# иначе они попали бы туда дважды.
+restic backup --quiet --tag daily --exclude /data/db/bookreviews_uploads.tar \
+  /data/db /data/bookreviews_uploads
 restic forget --quiet --prune --keep-daily 7 --keep-weekly 4 --keep-monthly 6
 log "restic: снапшотов $(restic snapshots --json | grep -o '"short_id"' | wc -l), $(restic stats --mode raw-data 2>/dev/null | grep -i 'total size' | sed 's/.*: *//')"
 
