@@ -84,6 +84,9 @@ jobs:
             User ${{ vars.VPS_USER }}
             IdentityFile ~/.ssh/id_ed25519
             StrictHostKeyChecking yes
+            # без keepalive тихий долгий шаг (pull большого образа) обрывался примерно через 5 минут
+            ServerAliveInterval 30
+            ServerAliveCountMax 10
           CFG
 
       - name: Copy deploy/
