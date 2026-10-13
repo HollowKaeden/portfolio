@@ -23,7 +23,7 @@ profile:
 
 projects:
   - slug: bookreviews
-    title: BookReviews
+    title: Мои книги
     summary: Каталог прочитанных мною книг с отзывами
     description: >-
       Здесь живут книги, которые я прочитал, читаю сейчас или бросил на середине,
@@ -48,7 +48,7 @@ projects:
     demo: { type: link, subdomain: foodgram }
 
   - slug: http-loadgen
-    title: http-loadgen
+    title: Генератор нагрузки
     summary: Генератор HTTP-нагрузки на Go с перцентилями латентности
     description: >-
       Утилита, которая засыпает сервер запросами и показывает, как он держится:

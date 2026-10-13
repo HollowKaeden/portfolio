@@ -8,7 +8,7 @@
     },
     {
       "id": "books-list",
-      "title": "BookReviews: список книг (API)",
+      "title": "Мои книги: список книг (API)",
       "url": "https://books.{domain}/api/books",
       "max_rps": 60
     },
