@@ -1,5 +1,6 @@
 // @ts-check
 import { defineConfig, envField } from 'astro/config';
+import { loadgenDevProxy } from './dev/loadgen-proxy.mjs';
 
 export default defineConfig({
   output: 'static',
@@ -10,4 +11,5 @@ export default defineConfig({
       DOMAIN: envField.string({ context: 'server', access: 'public', default: 'givemeanoffer.ru' }),
     },
   },
+  vite: { plugins: [loadgenDevProxy()] },
 });
