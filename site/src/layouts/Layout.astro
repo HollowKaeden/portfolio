@@ -8,15 +8,19 @@ import { getSite } from '../lib/content';
 interface Props {
   title?: string;
   description?: string;
+  // страница без постоянного адреса (404): не индексировать, без canonical
+  noindex?: boolean;
 }
 
 const { meta, profile } = await getSite();
 const title = Astro.props.title ? `${Astro.props.title} · ${meta.title}` : meta.title;
 const description = Astro.props.description ?? meta.description;
+const { noindex = false } = Astro.props;
 // Мессенджеры понимают только абсолютные адреса в og:*.
 const origin = `https://${DOMAIN}`;
 const pageUrl = new URL(Astro.url.pathname, origin).href;
-const image = meta.image && new URL(meta.image, origin).href;
+const image = meta.image;
+const imageUrl = image && new URL(image.src, origin).href;
 ---
 
 <!doctype html>
@@ -26,17 +30,29 @@ const image = meta.image && new URL(meta.image, origin).href;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={pageUrl} />}
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content={pageUrl} />
+    {!noindex && <meta property="og:url" content={pageUrl} />}
     <meta property="og:site_name" content={profile.name} />
     <meta property="og:locale" content="ru_RU" />
-    {image && <meta property="og:image" content={image} />}
-    {image && meta.image_alt && <meta property="og:image:alt" content={meta.image_alt} />}
-    <meta name="twitter:card" content="summary" />
+    {
+      image && (
+        <>
+          <meta property="og:image" content={imageUrl} />
+          <meta property="og:image:width" content={String(image.width)} />
+          <meta property="og:image:height" content={String(image.height)} />
+          <meta property="og:image:alt" content={image.alt} />
+        </>
+      )
+    }
+    <meta name="twitter:card" content={image ? 'summary_large_image' : 'summary'} />
     <meta name="theme-color" content="#171717" />
+    <!-- SVG для браузеров, .ico для Google и старых клиентов, PNG для иконки на экране iOS -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
     <main class="column">
