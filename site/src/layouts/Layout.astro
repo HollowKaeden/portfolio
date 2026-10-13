@@ -2,6 +2,7 @@
 import '@fontsource/source-code-pro/400.css';
 import '@fontsource/source-code-pro/500.css';
 import '../styles/global.css';
+import { DOMAIN } from 'astro:env/server';
 import { getSite } from '../lib/content';
 
 interface Props {
@@ -9,9 +10,13 @@ interface Props {
   description?: string;
 }
 
-const { meta } = await getSite();
+const { meta, profile } = await getSite();
 const title = Astro.props.title ? `${Astro.props.title} · ${meta.title}` : meta.title;
 const description = Astro.props.description ?? meta.description;
+// Мессенджеры понимают только абсолютные адреса в og:*.
+const origin = `https://${DOMAIN}`;
+const pageUrl = new URL(Astro.url.pathname, origin).href;
+const image = meta.image && new URL(meta.image, origin).href;
 ---
 
 <!doctype html>
@@ -24,6 +29,12 @@ const description = Astro.props.description ?? meta.description;
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content={pageUrl} />
+    <meta property="og:site_name" content={profile.name} />
+    <meta property="og:locale" content="ru_RU" />
+    {image && <meta property="og:image" content={image} />}
+    {image && meta.image_alt && <meta property="og:image:alt" content={meta.image_alt} />}
+    <meta name="twitter:card" content="summary" />
     <meta name="theme-color" content="#171717" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>

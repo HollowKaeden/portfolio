@@ -21,6 +21,8 @@ const site = defineCollection({
     meta: z.object({
       title: z.string(),
       description: z.string(),
+      image: z.string().startsWith('/').optional(),
+      image_alt: z.string().optional(),
     }),
     profile: z.object({
       name: z.string(),
