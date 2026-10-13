@@ -1,0 +1,1096 @@
+---
+// Форма http-loadgen: единственный JS-остров сайта. Говорит с loadgen-web по /loadgen/api
+// (тот же origin, CORS не нужен). Цели, пределы и тексты отказов приходят из API,
+// вёрстка и состояние живут в скрипте ниже.
+---
+
+<div class="loadgen" data-loadgen>
+  <noscript><p class="lg-message">Для запуска нагрузки нужен JavaScript.</p></noscript>
+
+  <form class="lg-form" data-form hidden>
+    <fieldset class="lg-field">
+      <legend class="lg-label">Цель</legend>
+      <div class="lg-targets" data-targets></div>
+    </fieldset>
+
+    <label class="lg-field">
+      <span class="lg-label-row">
+        <span class="lg-label">Нагрузка</span>
+        <output data-share-out></output>
+      </span>
+      <input type="range" name="share" step="5" value="30" />
+    </label>
+
+    <label class="lg-field">
+      <span class="lg-label-row">
+        <span class="lg-label">Длительность</span>
+        <output data-duration-out></output>
+      </span>
+      <input type="range" name="duration" min="5" step="1" value="10" />
+    </label>
+
+    <div class="lg-submit">
+      <button type="submit" disabled>Запустить</button>
+      <p class="lg-hint" data-hint aria-live="polite"></p>
+    </div>
+  </form>
+
+  <p class="lg-message" data-message aria-live="polite">Загружаю…</p>
+
+  <div class="lg-run" data-run hidden>
+    <div class="lg-run-head">
+      <h3 class="lg-run-title" data-run-title></h3>
+      <p class="lg-run-state" data-run-state></p>
+    </div>
+
+    <dl class="lg-now" data-now hidden>
+      <div><dt>запросов/с</dt><dd data-now="rps"></dd></div>
+      <div><dt>p95</dt><dd data-now="p95"></dd></div>
+      <div><dt>ошибок</dt><dd data-now="errors"></dd></div>
+    </dl>
+
+    <div class="lg-charts" data-charts tabindex="0" aria-label="Графики по секундам, стрелки влево и вправо листают секунды">
+      <figure class="lg-chart">
+        <figcaption class="lg-caption">Запросов в секунду</figcaption>
+        <svg data-chart="rps" role="img" aria-label="Запросов в секунду по секундам прогона"></svg>
+      </figure>
+      <figure class="lg-chart">
+        <figcaption class="lg-caption">
+          Латентность, мс
+          <span class="lg-legend" data-legend></span>
+        </figcaption>
+        <svg data-chart="latency" role="img" aria-label="Латентность p50, p95 и p99 по секундам прогона"></svg>
+      </figure>
+      <div class="lg-tooltip" data-tooltip hidden></div>
+    </div>
+
+    <table class="lg-report" data-report hidden></table>
+
+    <details class="lg-seconds" data-seconds-box hidden>
+      <summary>По секундам</summary>
+      <table data-seconds></table>
+    </details>
+  </div>
+</div>
+
+<script>
+  const API = '/loadgen/api';
+  const POLL_MS = 5000;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  // Ступени одной «чернильной» шкалы: p99 самая тёмная, хвост важнее всего.
+  // Все три держат контраст >= 3:1 к белой карточке.
+  const SERIES = [
+    { key: 'p50_ms', label: 'p50', color: '#949494' },
+    { key: 'p95_ms', label: 'p95', color: '#5f5f5f' },
+    { key: 'p99_ms', label: 'p99', color: '#282828' },
+  ] as const;
+
+  type Target = { id: string; title: string; max_rps: number };
+  type Targets = { targets: Target[]; min_share: number; max_share: number; max_duration_s: number };
+  type RunMeta = { id: string; target_id: string; rps: number; share: number; duration_s: number; started_at: string };
+  type Status = { running: boolean; run?: RunMeta; last_run_id?: string; next_run_in_s: number; cooldown_s: number };
+  type Win = {
+    i: number;
+    t_ms: number;
+    rps: number;
+    ok: number;
+    failed: number;
+    error_rate: number;
+    p50_ms: number;
+    p95_ms: number;
+    p99_ms: number;
+  };
+  type Report = {
+    total: number;
+    ok: number;
+    failed: number;
+    elapsed_ms: number;
+    rps: number;
+    latency_ms: { min: number; p50: number; p95: number; p99: number; max: number };
+    by_status: Record<string, number>;
+    by_error: Record<string, number>;
+  };
+  type Done = { report: Report; stopped?: 'brake' | 'abandoned' | 'shutdown' | 'error'; reason?: string };
+
+  // Прогон, который сейчас на экране: свой, чужой живой или последний завершённый.
+  type View = { id: string; meta: RunMeta | null; windows: Win[]; done: Done | null; lost: boolean };
+
+  const root = document.querySelector<HTMLElement>('[data-loadgen]');
+  if (root) init(root);
+
+  function init(root: HTMLElement) {
+    const $ = <T extends Element>(sel: string) => root.querySelector<T>(sel)!;
+    const form = $<HTMLFormElement>('[data-form]');
+    const targetsBox = $<HTMLElement>('[data-targets]');
+    const share = $<HTMLInputElement>('input[name=share]');
+    const duration = $<HTMLInputElement>('input[name=duration]');
+    const shareOut = $<HTMLOutputElement>('[data-share-out]');
+    const durationOut = $<HTMLOutputElement>('[data-duration-out]');
+    const button = $<HTMLButtonElement>('button[type=submit]');
+    const hint = $<HTMLElement>('[data-hint]');
+    const message = $<HTMLElement>('[data-message]');
+    const runBox = $<HTMLElement>('[data-run]');
+    const runTitle = $<HTMLElement>('[data-run-title]');
+    const runState = $<HTMLElement>('[data-run-state]');
+    const nowBox = $<HTMLElement>('dl[data-now]');
+    const charts = $<HTMLElement>('[data-charts]');
+    const rpsSvg = $<SVGSVGElement>('[data-chart=rps]');
+    const latSvg = $<SVGSVGElement>('[data-chart=latency]');
+    const legend = $<HTMLElement>('[data-legend]');
+    const tooltip = $<HTMLElement>('[data-tooltip]');
+    const reportTable = $<HTMLTableElement>('[data-report]');
+    const secondsBox = $<HTMLDetailsElement>('[data-seconds-box]');
+    const secondsTable = $<HTMLTableElement>('[data-seconds]');
+
+    let limits: Targets | null = null;
+    let cooldownS = 0;
+    let nextAt = 0; // когда сервис снова примет запуск (глобально)
+    let blockedUntil = 0; // а это наш личный запрет после 429, например лимит на IP
+    let starting = false;
+    let view: View | null = null;
+    let stream: EventSource | null = null;
+    let firstStatus = true;
+    let hover: number | null = null;
+    let waitedToZero = false;
+
+    for (const s of SERIES) {
+      const item = el('span', 'lg-legend-item');
+      const key = el('span', 'lg-key');
+      key.style.background = s.color;
+      item.append(key, s.label);
+      legend.append(item);
+    }
+
+    // --- форма
+
+    function selectedTarget(): Target | undefined {
+      const id = new FormData(form).get('target');
+      return limits?.targets.find((t) => t.id === id);
+    }
+
+    function targetRps(t: Target, sharePct: number) {
+      return Math.max(1, Math.round((t.max_rps * sharePct) / 100));
+    }
+
+    function renderTargets(data: Targets) {
+      limits = data;
+      share.min = String(data.min_share);
+      share.max = String(data.max_share);
+      share.value = String(clamp(Number(share.value), data.min_share, data.max_share));
+      duration.max = String(data.max_duration_s);
+      duration.value = String(clamp(Number(duration.value), Number(duration.min), data.max_duration_s));
+
+      targetsBox.replaceChildren(
+        ...data.targets.map((t, i) => {
+          const label = el('label', 'lg-target');
+          const input = document.createElement('input');
+          input.type = 'radio';
+          input.name = 'target';
+          input.value = t.id;
+          input.checked = i === 0;
+          const text = el('span', 'lg-target-text');
+          text.append(el('span', 'lg-target-title', t.title), el('span', 'lg-target-max', `максимум ${fmt(t.max_rps)} запросов/с`));
+          label.append(input, text);
+          return label;
+        }),
+      );
+      form.hidden = data.targets.length === 0;
+      if (data.targets.length === 0) setMessage('Цели для нагрузки ещё не настроены.');
+      else setMessage('');
+      updateOutputs();
+    }
+
+    function updateOutputs() {
+      const t = selectedTarget();
+      const pct = Number(share.value);
+      shareOut.textContent = t ? `${pct}% · ${fmt(targetRps(t, pct))} запросов/с` : `${pct}%`;
+      durationOut.textContent = `${duration.value} с`;
+    }
+
+    form.addEventListener('input', updateOutputs);
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const t = selectedTarget();
+      if (!t || starting) return;
+      starting = true;
+      updateControls();
+      try {
+        const res = await fetch(`${API}/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_id: t.id, share: Number(share.value), duration_s: Number(duration.value) }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 202) {
+          setMessage('');
+          watch(body.id, body as RunMeta);
+        } else if (res.status === 429) {
+          setMessage(body.error ?? 'Сейчас запустить нельзя.');
+          blockedUntil = Date.now() + (Number(body.retry_after_s) || 0) * 1000;
+        } else {
+          setMessage(body.error ?? `Сервис ответил ошибкой ${res.status}.`);
+        }
+      } catch {
+        setMessage('Не удалось связаться с сервисом нагрузки.');
+      } finally {
+        starting = false;
+        void refreshStatus();
+      }
+    });
+
+    function setMessage(text: string) {
+      message.textContent = text;
+      message.hidden = text === '';
+    }
+
+    function isLive() {
+      return view !== null && view.done === null && !view.lost;
+    }
+
+    function updateControls() {
+      const left = Math.max(nextAt, blockedUntil) - Date.now();
+      const busy = isLive() || left > 0;
+      button.disabled = !limits || starting || busy || !selectedTarget();
+
+      if (left > 0) {
+        hint.textContent = `${isLive() ? 'Идёт прогон. ' : ''}Следующий запуск через ${clock(left)}`;
+      } else if (limits) {
+        hint.textContent = `Один прогон на всех, после него пауза ${Math.round(cooldownS / 60)} мин`;
+      }
+
+      // Пауза кончилась: переспросим сервер, вдруг кто-то успел раньше.
+      if (left <= 0 && nextAt > 0 && !waitedToZero) {
+        waitedToZero = true;
+        void refreshStatus();
+      }
+      if (left > 0) waitedToZero = false;
+    }
+
+    // --- сервер
+
+    async function getJSON<T>(path: string): Promise<T> {
+      const res = await fetch(`${API}${path}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`${path}: ${res.status}`);
+      return res.json() as Promise<T>;
+    }
+
+    async function loadTargets() {
+      try {
+        renderTargets(await getJSON<Targets>('/targets'));
+      } catch {
+        setMessage('Сервис нагрузки сейчас недоступен, попробуйте позже.');
+      }
+    }
+
+    async function refreshStatus() {
+      let s: Status;
+      try {
+        s = await getJSON<Status>('/status');
+      } catch {
+        return; // недоступность уже показана при загрузке целей, таймер просто постоит
+      }
+      cooldownS = s.cooldown_s;
+      nextAt = Date.now() + s.next_run_in_s * 1000;
+      if (s.running && s.run && view?.id !== s.run.id) {
+        watch(s.run.id, s.run); // чужой прогон: смотрим вживую
+      } else if (firstStatus && !s.running && s.last_run_id && !view) {
+        watch(s.last_run_id, null); // только что пришли: покажем, чем кончился последний
+      }
+      firstStatus = false;
+      updateControls();
+    }
+
+    // --- поток событий прогона
+
+    function watch(id: string, meta: RunMeta | null) {
+      stream?.close();
+      view = { id, meta, windows: [], done: null, lost: false };
+      hover = null;
+      const es = new EventSource(`${API}/run/${encodeURIComponent(id)}/events`);
+      stream = es;
+      // После обрыва EventSource переподключается сам, а сервер шлёт историю с начала.
+      es.addEventListener('open', () => {
+        if (stream !== es || !view) return;
+        view.windows = [];
+        view.lost = false;
+      });
+      es.addEventListener('window', (e) => {
+        if (stream !== es || !view) return;
+        view.windows.push(JSON.parse((e as MessageEvent).data));
+        render();
+      });
+      es.addEventListener('done', (e) => {
+        if (stream !== es || !view) return;
+        es.close(); // иначе EventSource переподключится к закрытому потоку
+        view.done = JSON.parse((e as MessageEvent).data);
+        render();
+        updateControls();
+        // сервер отмечает конец прогона чуть позже, чем шлёт итог
+        setTimeout(() => void refreshStatus(), 1000);
+      });
+      es.addEventListener('error', () => {
+        if (stream !== es || !view || es.readyState !== EventSource.CLOSED) return;
+        if (!view.done) {
+          view.lost = true;
+          if (view.meta === null && view.windows.length === 0) view = null; // последний прогон уже не найти
+        }
+        render();
+        void refreshStatus();
+      });
+      render();
+      updateControls();
+    }
+
+    // --- отрисовка прогона
+
+    function render() {
+      runBox.hidden = view === null;
+      if (!view) return;
+      const { meta, windows, done } = view;
+      const target = meta && limits?.targets.find((t) => t.id === meta.target_id);
+
+      runTitle.textContent = meta
+        ? `${target?.title ?? meta.target_id} · ${fmt(meta.rps)} запросов/с · ${meta.duration_s} с`
+        : 'Последний прогон';
+      runState.textContent = stateText(view);
+      runState.classList.toggle('lg-alert', !!done?.stopped || view.lost);
+
+      const last = windows.at(-1);
+      nowBox.hidden = !isLive() || !last;
+      if (last) {
+        setNow('rps', fmt(last.rps));
+        setNow('p95', `${fmt(last.p95_ms)} мс`);
+        setNow('errors', pct(last.error_rate));
+      }
+
+      drawCharts();
+      renderReport(done?.report ?? null);
+      renderSeconds(windows);
+    }
+
+    function setNow(key: string, text: string) {
+      nowBox.querySelector(`[data-now=${key}]`)!.textContent = text;
+    }
+
+    function stateText(v: View): string {
+      const d = v.done;
+      if (d) {
+        switch (d.stopped) {
+          case 'brake':
+            return `Остановлено защитой: ${d.reason ?? 'сайт начал сдавать'}`;
+          case 'abandoned':
+            return 'Отменён: за прогоном никто не следил';
+          case 'shutdown':
+            return 'Прерван: сервис нагрузки перезапускался';
+          case 'error':
+            return `Ошибка: ${d.reason ?? 'неизвестная'}`;
+          default:
+            return 'Завершён';
+        }
+      }
+      if (v.lost) return 'Связь с прогоном потеряна';
+      const sec = Math.floor((v.windows.at(-1)?.t_ms ?? 0) / 1000);
+      return v.meta ? `Идёт: ${sec} из ${v.meta.duration_s} с` : 'Идёт';
+    }
+
+    function xMax(v: View) {
+      const lastMs = Math.max(v.windows.at(-1)?.t_ms ?? 0, v.done?.report.elapsed_ms ?? 0);
+      return Math.max(v.meta?.duration_s ?? 0, Math.ceil(lastMs / 1000), 1);
+    }
+
+    function drawCharts() {
+      if (!view) return;
+      const ws = view.windows;
+      const xm = xMax(view);
+      const ref = view.meta?.rps;
+      chart(rpsSvg, {
+        ws,
+        xMax: xm,
+        yMax: Math.max(...ws.map((w) => w.rps), (ref ?? 0) * 1.15, 1),
+        lines: [{ value: (w) => w.rps, color: '#282828', area: true }],
+        ref,
+      });
+      chart(latSvg, {
+        ws,
+        xMax: xm,
+        yMax: Math.max(...ws.map((w) => w.p99_ms), 1),
+        lines: SERIES.map((s) => ({ value: (w: Win) => w[s.key], color: s.color, label: s.label })),
+      });
+      drawTooltip();
+    }
+
+    type Line = { value: (w: Win) => number; color: string; area?: boolean; label?: string };
+    type ChartSpec = { ws: Win[]; xMax: number; yMax: number; lines: Line[]; ref?: number };
+    const PAD = { top: 10, right: 34, bottom: 22, left: 40 };
+    const HEIGHT = 150;
+
+    function chart(svg: SVGSVGElement, spec: ChartSpec) {
+      const width = Math.max(svg.clientWidth, 200);
+      svg.setAttribute('viewBox', `0 0 ${width} ${HEIGHT}`);
+      const plotW = width - PAD.left - PAD.right;
+      const plotH = HEIGHT - PAD.top - PAD.bottom;
+      const ticks = niceTicks(spec.yMax);
+      const yTop = ticks.at(-1)!;
+      const x = (t: number) => PAD.left + (t / spec.xMax) * plotW;
+      const y = (v: number) => PAD.top + plotH - (v / yTop) * plotH;
+      const nodes: SVGElement[] = [];
+
+      for (const tv of ticks) {
+        nodes.push(svgEl('line', { class: 'lg-grid', x1: PAD.left, x2: PAD.left + plotW, y1: y(tv), y2: y(tv) }));
+        nodes.push(svgEl('text', { class: 'lg-tick', x: PAD.left - 6, y: y(tv), 'text-anchor': 'end', 'dominant-baseline': 'middle' }, fmt(tv)));
+      }
+      for (const tx of xTicks(spec.xMax)) {
+        nodes.push(svgEl('text', { class: 'lg-tick', x: x(tx), y: HEIGHT - 6, 'text-anchor': 'middle' }, `${tx} с`));
+      }
+
+      if (spec.ref) {
+        nodes.push(svgEl('line', { class: 'lg-ref', x1: PAD.left, x2: PAD.left + plotW, y1: y(spec.ref), y2: y(spec.ref) }));
+        nodes.push(svgEl('text', { class: 'lg-tick', x: PAD.left + plotW + 4, y: y(spec.ref), 'dominant-baseline': 'middle' }, 'цель'));
+      }
+
+      const pts = (line: Line) => spec.ws.map((w) => [x(w.t_ms / 1000), y(line.value(w))] as const);
+      const ends: { y: number; label: string }[] = [];
+      for (const line of spec.lines) {
+        const p = pts(line);
+        if (p.length === 0) continue;
+        const d = p.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`).join('');
+        if (line.area) {
+          const base = y(0).toFixed(1);
+          nodes.push(svgEl('path', { class: 'lg-area', d: `${d}L${p.at(-1)![0].toFixed(1)},${base}L${p[0][0].toFixed(1)},${base}Z`, fill: line.color }));
+        }
+        nodes.push(svgEl('path', { class: 'lg-line', d, stroke: line.color }));
+        const [ex, ey] = p.at(-1)!;
+        nodes.push(svgEl('circle', { class: 'lg-dot', cx: ex, cy: ey, r: 4, fill: line.color }));
+        if (line.label) ends.push({ y: ey, label: line.label });
+      }
+
+      // Подписи концов линий только если не налезают друг на друга; иначе хватает легенды.
+      const sorted = [...ends].sort((a, b) => a.y - b.y);
+      const fits = sorted.every((e, i) => i === 0 || e.y - sorted[i - 1].y >= 12);
+      if (fits && hover === null) {
+        const lastX = pts(spec.lines[0]).at(-1)?.[0];
+        for (const e of ends) {
+          nodes.push(svgEl('text', { class: 'lg-tick lg-end', x: (lastX ?? 0) + 8, y: e.y, 'dominant-baseline': 'middle' }, e.label));
+        }
+      }
+
+      // Перекрестие на выбранной секунде: вертикальная линия и точки всех серий.
+      const hw = hover !== null ? spec.ws[hover] : undefined;
+      if (hw) {
+        const hx = x(hw.t_ms / 1000);
+        nodes.push(svgEl('line', { class: 'lg-cross', x1: hx, x2: hx, y1: PAD.top, y2: PAD.top + plotH }));
+        for (const line of spec.lines) {
+          nodes.push(svgEl('circle', { class: 'lg-dot', cx: hx, cy: y(line.value(hw)), r: 4, fill: line.color }));
+        }
+      }
+
+      svg.replaceChildren(...nodes);
+      svg.dataset.plotLeft = String(PAD.left);
+      svg.dataset.plotWidth = String(plotW);
+      svg.dataset.xMax = String(spec.xMax);
+    }
+
+    function niceTicks(max: number): number[] {
+      const raw = max / 3;
+      const mag = 10 ** Math.floor(Math.log10(raw));
+      const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw)!;
+      const out = [];
+      for (let v = 0; v < max + step * 0.999; v += step) out.push(Number(v.toPrecision(6)));
+      if (out.length < 2) out.push(step);
+      return out;
+    }
+
+    function xTicks(max: number): number[] {
+      // с шага, а не с нуля: «0 с» налезал бы на ноль оси Y
+      const step = max <= 6 ? 1 : 5;
+      const out = [];
+      for (let t = step; t <= max; t += step) out.push(t);
+      return out;
+    }
+
+    // --- наведение: одна секунда на оба графика сразу
+
+    function indexAt(clientX: number): number | null {
+      if (!view || view.windows.length === 0) return null;
+      const rect = rpsSvg.getBoundingClientRect();
+      const left = Number(rpsSvg.dataset.plotLeft);
+      const plotW = Number(rpsSvg.dataset.plotWidth);
+      const xm = Number(rpsSvg.dataset.xMax);
+      const t = ((clientX - rect.left - left) / plotW) * xm;
+      let best = 0;
+      view.windows.forEach((w, i) => {
+        if (Math.abs(w.t_ms / 1000 - t) < Math.abs(view!.windows[best].t_ms / 1000 - t)) best = i;
+      });
+      return best;
+    }
+
+    charts.addEventListener('pointermove', (e) => {
+      const i = indexAt(e.clientX);
+      if (i !== hover) {
+        hover = i;
+        drawCharts();
+      }
+      placeTooltip(e.clientX);
+    });
+    charts.addEventListener('pointerleave', () => {
+      hover = null;
+      drawCharts();
+    });
+    charts.addEventListener('keydown', (e) => {
+      const n = view?.windows.length ?? 0;
+      if (n === 0) return;
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const step = e.key === 'ArrowLeft' ? -1 : 1;
+        hover = clamp((hover ?? (step > 0 ? -1 : n)) + step, 0, n - 1);
+      } else if (e.key === 'Escape') {
+        hover = null;
+      } else return;
+      drawCharts();
+      placeTooltip();
+    });
+    charts.addEventListener('blur', () => {
+      hover = null;
+      drawCharts();
+    });
+
+    function drawTooltip() {
+      const w = hover !== null ? view?.windows[hover] : undefined;
+      tooltip.hidden = !w;
+      if (!w) return;
+      const row = (value: string, name: string, color?: string) => {
+        const r = el('div', 'lg-tip-row');
+        const key = el('span', 'lg-tip-key');
+        if (color) key.style.background = color;
+        r.append(key, el('strong', '', value), el('span', 'lg-tip-name', name));
+        return r;
+      };
+      tooltip.replaceChildren(
+        el('div', 'lg-tip-head', `${fmt(w.t_ms / 1000, 1)} с`),
+        row(fmt(w.rps), 'запросов/с', '#282828'),
+        ...[...SERIES].reverse().map((s) => row(`${fmt(w[s.key])} мс`, s.label, s.color)),
+        row(pct(w.error_rate), `ошибок (${w.failed})`),
+      );
+    }
+
+    function placeTooltip(clientX?: number) {
+      if (tooltip.hidden || hover === null || !view) return;
+      const box = charts.getBoundingClientRect();
+      let px: number;
+      if (clientX !== undefined) px = clientX - box.left;
+      else {
+        const left = Number(rpsSvg.dataset.plotLeft);
+        const plotW = Number(rpsSvg.dataset.plotWidth);
+        px = left + (view.windows[hover].t_ms / 1000 / Number(rpsSvg.dataset.xMax)) * plotW;
+      }
+      const tw = tooltip.offsetWidth;
+      const leftPos = px + 16 + tw > box.width ? px - 16 - tw : px + 16;
+      tooltip.style.left = `${Math.max(0, leftPos)}px`;
+    }
+
+    // --- таблицы
+
+    function renderReport(r: Report | null) {
+      reportTable.hidden = r === null;
+      if (!r) return;
+      const ms = (v: number) => `${fmt(v)} мс`;
+      const groups: [string, string][][] = [
+        [
+          ['запросы', `${fmt(r.total)} всего, ${fmt(r.ok)} успешно, ${fmt(r.failed)} с ошибкой`],
+          ['длительность', `${fmt(r.elapsed_ms / 1000, 1)} с`],
+          ['пропускная способность', `${fmt(r.rps, 1)} запросов/с`],
+        ],
+        [
+          ['латентность min', ms(r.latency_ms.min)],
+          ['латентность p50', ms(r.latency_ms.p50)],
+          ['латентность p95', ms(r.latency_ms.p95)],
+          ['латентность p99', ms(r.latency_ms.p99)],
+          ['латентность max', ms(r.latency_ms.max)],
+        ],
+        Object.entries(r.by_status ?? {})
+          .sort(([a], [b]) => Number(a) - Number(b))
+          .map(([code, n]) => [`статус ${code}`, fmt(n)]),
+        Object.entries(r.by_error ?? {})
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([kind, n]) => [`ошибка ${kind}`, fmt(n)]),
+      ];
+      const caption = el('caption', '', 'Итог');
+      reportTable.replaceChildren(
+        caption,
+        ...groups
+          .filter((g) => g.length > 0)
+          .map((g) => {
+            const body = document.createElement('tbody');
+            for (const [k, v] of g) {
+              const tr = document.createElement('tr');
+              tr.append(el('th', '', k), el('td', '', v));
+              tr.firstElementChild!.setAttribute('scope', 'row');
+              body.append(tr);
+            }
+            return body;
+          }),
+      );
+    }
+
+    function renderSeconds(ws: Win[]) {
+      secondsBox.hidden = ws.length === 0;
+      const head = document.createElement('tr');
+      for (const h of ['с', 'запр/с', 'p50', 'p95', 'p99', 'ошибок']) head.append(el('th', '', h));
+      const rows = ws.map((w) => {
+        const tr = document.createElement('tr');
+        for (const v of [fmt(w.t_ms / 1000, 1), fmt(w.rps), fmt(w.p50_ms), fmt(w.p95_ms), fmt(w.p99_ms), pct(w.error_rate)]) {
+          tr.append(el('td', '', v));
+        }
+        return tr;
+      });
+      const thead = document.createElement('thead');
+      thead.append(head);
+      const tbody = document.createElement('tbody');
+      tbody.append(...rows);
+      secondsTable.replaceChildren(thead, tbody);
+    }
+
+    // --- запуск
+
+    new ResizeObserver(() => drawCharts()).observe(charts);
+    setInterval(updateControls, 1000);
+    setInterval(() => {
+      if (document.hidden) return;
+      if (!limits) void loadTargets();
+      if (!isLive()) void refreshStatus(); // пока смотрим живой прогон, статус не нужен
+    }, POLL_MS);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && !isLive()) void refreshStatus();
+    });
+    window.addEventListener('pagehide', () => stream?.close());
+
+    void loadTargets().then(refreshStatus);
+  }
+
+  // --- мелочи
+
+  function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text?: string) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function svgEl(tag: string, attrs: Record<string, string | number>, text?: string) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  const numberFormats = new Map<number, Intl.NumberFormat>();
+  function fmt(v: number, digits?: number) {
+    // мелкие числа с десятыми, крупные целыми: 0,8 мс, 12 мс, 1 090 запросов
+    const d = digits ?? (Math.abs(v) < 10 ? 1 : 0);
+    let f = numberFormats.get(d);
+    if (!f) numberFormats.set(d, (f = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d })));
+    return f.format(v);
+  }
+
+  function pct(rate: number) {
+    return `${fmt(rate * 100, 0)}%`;
+  }
+
+  function clock(ms: number) {
+    const s = Math.ceil(ms / 1000);
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  function clamp(v: number, lo: number, hi: number) {
+    return Math.min(Math.max(v, lo), hi);
+  }
+</script>
+
+<style is:global>
+  /* Глобально, но всё под .loadgen: узлы, которые создаёт скрипт, не получают
+     атрибутов scoped-стилей Astro. */
+  .loadgen {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    margin-top: 18px;
+    accent-color: var(--color-text);
+  }
+
+  .loadgen [hidden] {
+    display: none !important;
+  }
+
+  .lg-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .lg-field {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+
+  .lg-label,
+  .lg-caption,
+  .lg-report caption,
+  .lg-seconds summary {
+    font: var(--text-nav);
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .lg-label {
+    padding: 0;
+  }
+
+  legend.lg-label {
+    margin-bottom: 10px;
+  }
+
+  .lg-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .lg-label-row output {
+    font: var(--text-sub);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lg-targets {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .lg-target {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+  }
+
+  .lg-target input {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin: 2px 0 0;
+  }
+
+  .lg-target-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .lg-target-title {
+    font: var(--text-body);
+  }
+
+  .lg-target-max,
+  .lg-hint,
+  .lg-run-state,
+  .lg-message {
+    font: var(--text-sub);
+    color: var(--color-muted);
+  }
+
+  .loadgen input[type='range'] {
+    width: 100%;
+    margin: 0;
+  }
+
+  .lg-submit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+  }
+
+  .lg-submit button {
+    font: var(--text-nav);
+    letter-spacing: 0;
+    text-transform: uppercase;
+    color: var(--color-surface);
+    background: var(--color-text);
+    border: 0;
+    border-radius: var(--thumb-radius);
+    padding: 10px 16px;
+    cursor: pointer;
+  }
+
+  .lg-submit button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  .lg-submit button:focus-visible,
+  .lg-charts:focus-visible,
+  .lg-seconds summary:focus-visible {
+    outline: 2px solid var(--color-text);
+    outline-offset: 2px;
+  }
+
+  .lg-message {
+    color: var(--color-text);
+  }
+
+  .lg-run {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-tag);
+  }
+
+  .lg-run-head {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .lg-run-title {
+    font: var(--text-title);
+  }
+
+  .lg-run-state.lg-alert {
+    color: var(--color-text);
+  }
+
+  .lg-now {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 32px;
+    margin: 0;
+  }
+
+  .lg-now div {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 6px;
+  }
+
+  .lg-now dt {
+    font: var(--text-caption);
+    color: var(--color-muted);
+  }
+
+  .lg-now dd {
+    margin: 0;
+    font: var(--text-title);
+  }
+
+  .lg-charts {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    border-radius: 4px;
+    touch-action: pan-y;
+  }
+
+  .lg-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+  }
+
+  .lg-caption {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 16px;
+  }
+
+  .lg-legend {
+    display: flex;
+    gap: 12px;
+    font: var(--text-caption);
+    text-transform: none;
+    color: var(--color-muted);
+  }
+
+  .lg-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .lg-key,
+  .lg-tip-key {
+    display: inline-block;
+    width: 12px;
+    height: 2px;
+    border-radius: 1px;
+  }
+
+  .lg-chart svg {
+    display: block;
+    width: 100%;
+    height: 150px;
+    overflow: visible;
+  }
+
+  .lg-grid {
+    stroke: var(--color-tag);
+    stroke-width: 1;
+  }
+
+  .lg-ref {
+    stroke: var(--color-muted);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+  }
+
+  .lg-cross {
+    stroke: var(--color-muted);
+    stroke-width: 1;
+  }
+
+  .lg-tick {
+    font: var(--text-caption);
+    fill: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lg-end {
+    fill: var(--color-text);
+  }
+
+  .lg-line {
+    fill: none;
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .lg-area {
+    opacity: 0.1;
+  }
+
+  .lg-dot {
+    stroke: var(--color-surface);
+    stroke-width: 2;
+  }
+
+  .lg-tooltip {
+    position: absolute;
+    top: 28px;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    background: var(--color-surface);
+    border-radius: var(--thumb-radius);
+    box-shadow: 0 2px 12px rgb(0 0 0 / 0.14);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .lg-tip-head {
+    font: var(--text-caption);
+    color: var(--color-muted);
+  }
+
+  .lg-tip-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font: var(--text-caption);
+  }
+
+  .lg-tip-row strong {
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lg-tip-name {
+    color: var(--color-muted);
+  }
+
+  .lg-report,
+  .lg-seconds table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--text-sub);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lg-report caption {
+    text-align: left;
+    padding-bottom: 10px;
+  }
+
+  .lg-report tbody + tbody tr:first-child > * {
+    padding-top: 12px;
+  }
+
+  .lg-report th {
+    text-align: left;
+    font-weight: 400;
+    color: var(--color-muted);
+    padding: 2px 16px 2px 0;
+    white-space: nowrap;
+    width: 1%;
+  }
+
+  .lg-report td {
+    padding: 2px 0;
+  }
+
+  .lg-report th,
+  .lg-report td {
+    vertical-align: top;
+  }
+
+  @media (max-width: 559px) {
+    .lg-report th {
+      white-space: normal;
+      width: 50%;
+    }
+  }
+
+  .lg-seconds summary {
+    cursor: pointer;
+    border-radius: 2px;
+  }
+
+  .lg-seconds table {
+    margin-top: 10px;
+    font: var(--text-caption);
+  }
+
+  .lg-seconds th,
+  .lg-seconds td {
+    text-align: right;
+    padding: 4px 0 4px 8px;
+  }
+
+  .lg-seconds th {
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+
+  .lg-seconds th:first-child,
+  .lg-seconds td:first-child {
+    text-align: left;
+    padding-left: 0;
+  }
+
+  .lg-seconds tbody tr {
+    border-top: 1px solid var(--color-tag);
+  }
+</style>

@@ -3,6 +3,7 @@ import Layout from '../../layouts/Layout.astro';
 import Card from '../../components/Card.astro';
 import SectionTitle from '../../components/SectionTitle.astro';
 import Tags from '../../components/Tags.astro';
+import LoadgenForm from '../../components/LoadgenForm.astro';
 import { demoUrl, getProjects, type Project } from '../../lib/content';
 
 export async function getStaticPaths() {
@@ -62,7 +63,7 @@ const demoHref = demo && demoUrl(demo);
     demo?.type === 'loadgen-form' && (
       <Card aria-labelledby="loadgen">
         <SectionTitle id="loadgen">Нагрузить сайт</SectionTitle>
-        <p class="placeholder muted">Форма запуска появится здесь.</p>
+        <LoadgenForm />
       </Card>
     )
   }
@@ -117,9 +118,5 @@ const demoHref = demo && demoUrl(demo);
     font: var(--text-nav);
     letter-spacing: 0;
     text-transform: uppercase;
-  }
-
-  .placeholder {
-    margin-top: 18px;
   }
 </style>
