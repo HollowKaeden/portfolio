@@ -6,6 +6,7 @@
   --color-muted: rgb(40 40 40 / 0.5);
   --color-thumb: #313131;
   --color-tag: rgb(40 40 40 / 0.06);
+  --color-frame: rgb(40 40 40 / 0.12);
 
   --font-mono: 'Source Code Pro', ui-monospace, 'Cascadia Mono', Consolas, monospace;
   --tracking: -0.04em;

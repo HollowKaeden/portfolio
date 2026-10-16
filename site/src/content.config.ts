@@ -43,22 +43,25 @@ const projects = defineCollection({
   loader: section((doc) =>
     (doc.projects ?? []).map((p: any, order: number) => ({ id: p.slug, order, ...p })),
   ),
-  schema: z.object({
-    order: z.number(),
-    slug: z.string().regex(/^[a-z0-9-]+$/),
-    title: z.string(),
-    summary: z.string(),
-    description: z.string().optional(),
-    stack: z.array(z.string()).default([]),
-    repo: z.url().optional(),
-    preview: z.string().optional(),
-    demo: z
-      .discriminatedUnion('type', [
-        z.object({ type: z.literal('link'), subdomain: z.string().regex(/^[a-z0-9-]+$/) }),
-        z.object({ type: z.literal('loadgen-form') }),
-      ])
-      .optional(),
-  }),
+  schema: ({ image }) =>
+    z.object({
+      order: z.number(),
+      slug: z.string().regex(/^[a-z0-9-]+$/),
+      title: z.string(),
+      summary: z.string(),
+      description: z.string().optional(),
+      stack: z.array(z.string()).default([]),
+      repo: z.url().optional(),
+      // пути относительно site.yaml, Astro сам сожмёт картинки и нарежет размеры
+      preview: image().optional(), // скриншот над названием на странице проекта
+      thumb: image().optional(), // квадратик в списке проектов; без него обрезается preview
+      demo: z
+        .discriminatedUnion('type', [
+          z.object({ type: z.literal('link'), subdomain: z.string().regex(/^[a-z0-9-]+$/) }),
+          z.object({ type: z.literal('loadgen-form') }),
+        ])
+        .optional(),
+    }),
 });
 
 const achievements = defineCollection({

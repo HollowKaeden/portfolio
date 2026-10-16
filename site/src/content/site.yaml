@@ -25,6 +25,8 @@ profile:
     - { label: Telegram, url: https://t.me/BlessNT }
     - { label: Резюме, url: /resume.pdf }
 
+# preview: скриншот 16:10 над названием на странице проекта; thumb: квадрат в списке.
+# Оба необязательны, файлы лежат в src/assets/projects/, пути относительно этого файла.
 projects:
   - slug: bookreviews
     title: Мои книги
@@ -36,6 +38,8 @@ projects:
       которые в CI прогоняются и на SQLite, и на настоящем PostgreSQL.
     stack: [FastAPI, PostgreSQL, SQLAlchemy 2, Alembic, Jinja2, Docker, GitHub Actions]
     repo: https://github.com/HollowKaeden/BookReviews
+    preview: ../assets/projects/bookreviews.png
+    thumb: ../assets/projects/bookreviews-thumb.png
     demo: { type: link, subdomain: books }
 
   - slug: foodgram
@@ -49,6 +53,8 @@ projects:
       был готовым, бэкенд и деплой мои.
     stack: [Python 3.9, Django 3.2, DRF, PostgreSQL, Gunicorn, Nginx, React, Docker]
     repo: https://github.com/HollowKaeden/foodgram-st
+    preview: ../assets/projects/foodgram.png
+    thumb: ../assets/projects/foodgram-thumb.png
     demo: { type: link, subdomain: foodgram }
 
   - slug: http-loadgen
@@ -63,6 +69,7 @@ projects:
       сайту ещё работать.
     stack: [Go, net/http, context, GitHub Actions]
     repo: https://github.com/HollowKaeden/http-loadgen
+    thumb: ../assets/projects/http-loadgen-thumb.png
     demo: { type: loadgen-form }
 
   - slug: portfolio
@@ -75,6 +82,7 @@ projects:
       Базы данных каждый день бэкапятся: книжную полку было бы особенно жалко.
     stack: [Astro, TypeScript, Caddy, Docker Compose, GitHub Actions]
     repo: https://github.com/HollowKaeden/portfolio
+    thumb: ../assets/projects/portfolio-thumb.png
 
 # Плоский список; на сайте группируется по году, свежие сверху.
 achievements:
