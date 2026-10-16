@@ -39,6 +39,10 @@ docker run --rm -e RESTIC_REPOSITORY -e RESTIC_PASSWORD \
 
 dump=$work/data/db/bookreviews.dump
 [ -s "$dump" ] || { echo "ПРОВАЛ: в снапшоте нет bookreviews.dump"; exit 1; }
+# эталон Фудграма: вне сервера его копия только здесь
+for f in foodgram.dump media.tar; do
+  [ -s "$work/data/foodgram-seed/$f" ] || { echo "ПРОВАЛ: в снапшоте нет эталона Фудграма ($f)"; exit 1; }
+done
 
 echo "== Разворачиваю дамп во временном Postgres (без сети)"
 docker run -d --name "$CHECK_PG" --network none -e POSTGRES_PASSWORD=check \

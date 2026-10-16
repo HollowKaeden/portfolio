@@ -172,7 +172,7 @@ volumes:
   caddy_config:
   postgres_data: # БД всех проектов, в бэкапе
   bookreviews_uploads: # обложки книг, в бэкапе
-  foodgram_media: # картинки рецептов и аватары; во внешний бэкап не идут (только дамп БД)
+  foodgram_media: # картинки рецептов и аватары; каждую ночь сбрасываются к эталону (foodgram-reset.sh)
 
 networks:
   proxy:
