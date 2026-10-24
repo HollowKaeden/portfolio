@@ -29,8 +29,9 @@ Caddy принимает весь трафик на 443 порту, сам по�
 | `www.givemeanoffer.ru` | редирект на `givemeanoffer.ru` |
 | `books.givemeanoffer.ru` | `bookreviews` (FastAPI) |
 | `foodgram.givemeanoffer.ru` | `foodgram-gateway` (nginx со сборкой React), API и админку проксирует в `foodgram-backend` (Django) |
+| `pvz.givemeanoffer.ru` | `pvz` (Go): API приёмки товаров на ПВЗ и Swagger UI на `/docs/` |
 
-BookReviews и Фудграм хранят данные в одном общем PostgreSQL, у каждого своя база и свой пользователь.
+BookReviews, Фудграм и ПВЗ-сервис хранят данные в одном общем PostgreSQL, у каждого своя база и свой пользователь.
 
 Репозитории связаны только через Docker-образы, без git-подмодулей:
 
@@ -53,9 +54,9 @@ BookReviews и Фудграм хранят данные в одном общем
 - **Caddyfile не в образе.** Он монтируется папкой из `deploy/caddy/`, поэтому правка роутинга
   деплоится без пересборки. Именно папкой, а не файлом: rsync заменяет файл, и bind-mount
   файла продолжал бы видеть старую версию.
-- **Реестры.** Маленькие образы (сайт, BookReviews, loadgen-web) лежат в ghcr, большие образы
+- **Реестры.** Маленькие образы (сайт, BookReviews, loadgen-web, pvz-service) лежат в ghcr, большие образы
   Фудграма в Docker Hub: с сервера в России ghcr отдаёт ~0.2 МБ/с, Docker Hub ~30 МБ/с.
-- **Postgres общий** на оба проекта: две БД, два пользователя, `shared_buffers=128MB`,
+- **Postgres общий** на все проекты: у каждого своя БД и свой пользователь, `shared_buffers=128MB`,
   `max_connections=40`. Скрипт создания ролей и БД идемпотентный и запускается на каждом деплое,
   потому что штатный init образа выполняется только на пустом volume, а новые проекты добавляются
   на живой сервер.
@@ -101,6 +102,7 @@ deploy/                       всё, что копируется на серв�
   backup.sh                   ежедневный бэкап, локально и в Yandex Object Storage
   restore-check.sh            проверка, что бэкап восстанавливается
   foodgram-reset.sh           ежедневный сброс Фудграма к эталону
+  pvz-reset.sh                ежедневный сброс демо ПВЗ-сервиса
 Dockerfile                    сборка сайта в образ Caddy со статикой
 .github/workflows/build-deploy.yml   сборка образа сайта и деплой
 ```
@@ -183,11 +185,12 @@ docker compose exec foodgram-backend python manage.py createsuperuser
 
 Деплой не стартует при упавшей сборке, прогоны идут строго по очереди. После `up -d` workflow
 перечитывает Caddyfile, перезапускает `loadgen-web` (он читает `targets.json` при старте) и проверяет
-главную, редирект с `www`, `/health` и `/ready` BookReviews, API Фудграма и `/loadgen/api/status`.
+главную, редирект с `www`, `/health` и `/ready` BookReviews, API Фудграма, `/loadgen/api/status`,
+`/health` и Swagger UI ПВЗ-сервиса.
 При провале печатает `docker compose ps` и логи.
 
 Откат на конкретную версию: указать в `.env` тег образа (`PORTFOLIO_TAG`, `BOOKREVIEWS_TAG`,
-`FOODGRAM_TAG`, `LOADGEN_TAG`) равным sha коммита и сделать `docker compose up -d`.
+`FOODGRAM_TAG`, `LOADGEN_TAG`, `PVZ_TAG`) равным sha коммита и сделать `docker compose up -d`.
 
 ### Бэкапы
 
@@ -201,6 +204,8 @@ docker compose exec foodgram-backend python manage.py createsuperuser
   Postgres без сети и сравнивает число книг и обложек с рабочей базой. Рабочие сервисы не трогает.
 - [foodgram-reset.sh](deploy/foodgram-reset.sh), cron в 04:00: возвращает БД и медиа Фудграма
   к эталону. `foodgram-reset.sh snapshot` снимает новый эталон из текущего состояния.
+- [pvz-reset.sh](deploy/pvz-reset.sh), cron в 04:10: удаляет данные посетителей демо ПВЗ-сервиса
+  и создаёт эталонный набор заново. Демо публичное, данные не ценные, в бэкап не входят.
 
 ### Калибровка формы нагрузки
 

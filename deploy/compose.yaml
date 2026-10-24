@@ -44,6 +44,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
       BOOKREVIEWS_DB_PASSWORD: ${BOOKREVIEWS_DB_PASSWORD:?задайте BOOKREVIEWS_DB_PASSWORD в .env}
       FOODGRAM_DB_PASSWORD: ${FOODGRAM_DB_PASSWORD:?задайте FOODGRAM_DB_PASSWORD в .env}
+      PVZ_DB_PASSWORD: ${PVZ_DB_PASSWORD:?задайте PVZ_DB_PASSWORD в .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -166,6 +167,33 @@ services:
     mem_limit: 128m
     networks:
       - proxy
+
+  # ПВЗ-сервис (Go, distroless). Миграции при старте. Демо публичное: данные
+  # сбрасываются каждую ночь (pvz-reset.sh), в бэкап не входят.
+  pvz:
+    image: ghcr.io/hollowkaeden/pvz-service:${PVZ_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://pvz:${PVZ_DB_PASSWORD}@postgres:5432/pvz?sslmode=disable
+      JWT_SECRET: ${PVZ_JWT_SECRET:?задайте PVZ_JWT_SECRET в .env}
+      MIGRATE_ON_START: "true"
+      # Postgres общий на все проекты (max_connections 40)
+      DB_MAX_CONNS: 5
+      TRUSTED_PROXIES: *caddy-ip # IP посетителя из X-Forwarded-For только от Caddy
+      GOMEMLIMIT: 100MiB # мягкий предел для сборщика мусора Go, ниже mem_limit
+    healthcheck:
+      # в образе нет shell и curl: проверку делает сам бинарник
+      test: ["CMD", "pvz", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    mem_limit: 128m
+    networks:
+      - proxy
+      - db
 
 volumes:
   caddy_data: # сертификаты, терять нельзя: Let's Encrypt ограничивает перевыпуск

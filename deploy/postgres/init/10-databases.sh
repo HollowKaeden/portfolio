@@ -33,3 +33,4 @@ SQL
 
 create_project_db bookreviews "${BOOKREVIEWS_DB_PASSWORD:-}" || exit 1
 create_project_db foodgram "${FOODGRAM_DB_PASSWORD:-}" || exit 1
+create_project_db pvz "${PVZ_DB_PASSWORD:-}" || exit 1

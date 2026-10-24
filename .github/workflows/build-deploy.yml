@@ -127,6 +127,8 @@ jobs:
           check "https://foodgram.$DOMAIN/" 200
           check "https://foodgram.$DOMAIN/api/recipes/?limit=1" 200
           check "https://$DOMAIN/loadgen/api/status" 200
+          check "https://pvz.$DOMAIN/health" 200   # заодно проверяет связь с БД
+          check "https://pvz.$DOMAIN/docs/" 200
 
       - name: Logs on failure
         if: failure()

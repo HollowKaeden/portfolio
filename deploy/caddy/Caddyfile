@@ -48,6 +48,15 @@ books.{$DOMAIN} {
 	reverse_proxy bookreviews:8000
 }
 
+# ПВЗ-сервис. Тела запросов — пара полей JSON, сервис сам ограничивает их 1 МБ.
+pvz.{$DOMAIN} {
+	import common
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy pvz:8080
+}
+
 # Фудграм. Картинки приходят base64 в JSON: файл до 5 МБ даёт тело около 7 МБ.
 foodgram.{$DOMAIN} {
 	import common
