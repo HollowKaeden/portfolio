@@ -54,6 +54,11 @@ pvz.{$DOMAIN} {
 	request_body {
 		max_size 1MB
 	}
+	# gRPC на том же адресе: снаружи HTTP/2 по TLS, внутри сети Docker к
+	# gRPC-серверу pvz без TLS (h2c). Отличается от обычных запросов типом
+	# тела. encode его не сжимает: application/grpc нет в списке типов.
+	@grpc header Content-Type application/grpc*
+	reverse_proxy @grpc h2c://pvz:3000
 	reverse_proxy pvz:8080
 }
 
