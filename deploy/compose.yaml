@@ -3,7 +3,7 @@ name: givemeanoffer
 # Сети:
 # - proxy: Caddy и приложения за ним. У Caddy фиксированный адрес, чтобы приложения
 #   доверяли X-Forwarded-* только от него (FORWARDED_ALLOW_IPS и аналоги).
-# - db: внутренняя, только приложения и Postgres; Caddy в неё не входит, наружу выхода нет.
+# - db: внутренняя, приложения, Postgres и Kafka; Caddy в неё не входит, наружу выхода нет.
 x-caddy-ip: &caddy-ip 172.30.0.2
 
 # Образы: маленькие (сайт, BookReviews) в ghcr; Фудграм в Docker Hub, потому что ghcr
@@ -186,6 +186,8 @@ services:
       # /register и /login с одного IP: защита от перебора паролей, а bcrypt на
       # 1 vCPU дорогой. Остальные ручки лимит не трогает.
       AUTH_RATE_LIMIT: 10/1m
+      KAFKA_BROKERS: kafka:19092
+      KAFKA_TOPIC: pvz.reception.closed
       GOMEMLIMIT: 100MiB # мягкий предел для сборщика мусора Go, ниже mem_limit
     healthcheck:
       # в образе нет shell и curl: проверку делает сам бинарник
@@ -198,10 +200,50 @@ services:
       - proxy
       - db
 
+  # Брокер доступен только приложениям в db. pvz не ждёт его готовности:
+  # при остановке Kafka API продолжает работать, события копятся в outbox.
+  kafka:
+    image: apache/kafka:4.1.1
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx256m
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_MS: 86400000
+      KAFKA_LOG_RETENTION_BYTES: 33554432
+      KAFKA_LOG_SEGMENT_BYTES: 8388608
+      KAFKA_LOG_ROLL_MS: 3600000
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:19092", "--list"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 5
+    mem_limit: 512m
+    networks:
+      - db
+
 volumes:
   caddy_data: # сертификаты, терять нельзя: Let's Encrypt ограничивает перевыпуск
   caddy_config:
   postgres_data: # БД всех проектов, в бэкапе
+  kafka_data: # журнал демо: сутки хранения, в бэкап не входит
   bookreviews_uploads: # обложки книг, в бэкапе
   foodgram_media: # картинки рецептов и аватары; каждую ночь сбрасываются к эталону (foodgram-reset.sh)
 
