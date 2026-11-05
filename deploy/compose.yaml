@@ -45,6 +45,7 @@ services:
       BOOKREVIEWS_DB_PASSWORD: ${BOOKREVIEWS_DB_PASSWORD:?задайте BOOKREVIEWS_DB_PASSWORD в .env}
       FOODGRAM_DB_PASSWORD: ${FOODGRAM_DB_PASSWORD:?задайте FOODGRAM_DB_PASSWORD в .env}
       PVZ_DB_PASSWORD: ${PVZ_DB_PASSWORD:?задайте PVZ_DB_PASSWORD в .env}
+      PVZ_BILLING_DB_PASSWORD: ${PVZ_BILLING_DB_PASSWORD:?задайте PVZ_BILLING_DB_PASSWORD в .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -202,6 +203,32 @@ services:
 
   # Брокер доступен только приложениям в db. pvz не ждёт его готовности:
   # при остановке Kafka API продолжает работать, события копятся в outbox.
+  billing:
+    image: ghcr.io/hollowkaeden/pvz-service:${PVZ_TAG:-latest}
+    entrypoint: ["billing"]
+    command: ["serve"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BILLING_DATABASE_URL: postgres://pvz_billing:${PVZ_BILLING_DB_PASSWORD}@postgres:5432/pvz_billing?sslmode=disable
+      BILLING_DB_MAX_CONNS: 3
+      BILLING_MIGRATE_ON_START: "true"
+      KAFKA_BROKERS: kafka:19092
+      KAFKA_TOPIC: pvz.reception.closed
+      BILLING_CONSUMER_GROUP: pvz-billing
+      GOMEMLIMIT: 48MiB
+    healthcheck:
+      test: ["CMD", "billing", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    mem_limit: 64m
+    networks:
+      - proxy
+      - db
+
   kafka:
     image: apache/kafka:4.1.1
     restart: unless-stopped

@@ -6,8 +6,8 @@
 #
 #   bash /opt/givemeanoffer/pvz-reset.sh     вручную; cron в 04:10, после сброса Фудграма
 #
-# Лог cron: backups/pvz-reset.log. Когда появится billing, он сбрасывается первым:
-# его журнал начислений ссылается на ПВЗ из pvz.
+# Лог cron: backups/pvz-reset.log. Billing сбрасывается первым: журнал и balances
+# очищаются, offsets уходят в конец топика. Старые события не начисляются заново.
 set -euo pipefail
 
 APP_DIR=/opt/givemeanoffer
@@ -15,7 +15,13 @@ cd "$APP_DIR"
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*"; }
 
+# Остановка обоих писателей исключает гонку со вчерашними outbox-событиями.
+# Даже при ошибке reset поднимаем сервисы обратно; pending_reset завершит
+# незаконченный перенос offsets при старте billing.
+trap 'docker compose --project-directory "$APP_DIR" up -d pvz billing' EXIT
+docker compose --project-directory "$APP_DIR" stop pvz billing
+log "сброс billing и перевод offsets в конец вчерашнего журнала"
+docker compose --project-directory "$APP_DIR" run --rm --no-deps billing demo-reset
 log "сброс демо pvz"
-# pvz пишет в лог одну строку JSON: итог или ошибку
-docker compose --project-directory "$APP_DIR" exec -T pvz pvz demo-reset
+docker compose --project-directory "$APP_DIR" run --rm --no-deps pvz demo-reset
 log "готово"

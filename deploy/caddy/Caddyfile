@@ -58,6 +58,8 @@ pvz.{$DOMAIN} {
 	# gRPC-серверу pvz без TLS (h2c). Отличается от обычных запросов типом
 	# тела. encode его не сжимает: application/grpc нет в списке типов.
 	@grpc header Content-Type application/grpc*
+	@billing path /billing/*
+	reverse_proxy @billing billing:8081
 	reverse_proxy @grpc h2c://pvz:3000
 	reverse_proxy pvz:8080
 }
