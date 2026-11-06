@@ -11,6 +11,7 @@
 | Портфолио (Astro, статика) | [givemeanoffer.ru](https://givemeanoffer.ru) | этот |
 | Мои книги (FastAPI, PostgreSQL) | [books.givemeanoffer.ru](https://books.givemeanoffer.ru) | [BookReviews](https://github.com/HollowKaeden/BookReviews) |
 | Фудграм (Django, DRF, React) | [foodgram.givemeanoffer.ru](https://foodgram.givemeanoffer.ru) | [foodgram-st](https://github.com/HollowKaeden/foodgram-st) |
+| ПВЗ-сервис (Go, gRPC, Kafka) | [pvz.givemeanoffer.ru](https://pvz.givemeanoffer.ru) | [pvz-service](https://github.com/HollowKaeden/pvz-service) |
 | Генератор нагрузки (Go): форма, которая нагружает этот же сервер | [givemeanoffer.ru/projects/http-loadgen/](https://givemeanoffer.ru/projects/http-loadgen/) | [http-loadgen](https://github.com/HollowKaeden/http-loadgen) |
 
 ## Как это устроено
@@ -36,6 +37,7 @@ Caddy принимает весь трафик на 443 порту, сам по�
 | `books.givemeanoffer.ru` | `bookreviews` (FastAPI) |
 | `foodgram.givemeanoffer.ru` | `foodgram-gateway` (nginx со сборкой React), API и админку проксирует в `foodgram-backend` (Django) |
 | `pvz.givemeanoffer.ru` | `pvz` (Go): API приёмки товаров на ПВЗ и Swagger UI на `/docs/` |
+| `pvz.givemeanoffer.ru/billing/*` | `billing` (Go): балансы, журнал начислений и ставки |
 
 BookReviews, Фудграм и ПВЗ-сервис хранят данные в одном общем PostgreSQL, у каждого своя база и свой пользователь.
 
@@ -219,12 +221,38 @@ docker compose exec foodgram-backend python manage.py createsuperuser
 на одном ядре любой посторонний процесс портит цифры.
 
 ```sh
-rm -rf /tmp/cal && mkdir /tmp/cal && cp /opt/givemeanoffer/loadgen/targets.json /tmp/cal/
-chmod 777 /tmp/cal && chmod 666 /tmp/cal/targets.json
-docker run --rm --network givemeanoffer_proxy --memory 384m -v /tmp/cal:/cal \
+cal_dir=$(mktemp -d /tmp/loadgen-cal.XXXXXX)
+cp /opt/givemeanoffer/loadgen/targets.json "$cal_dir/"
+chmod 777 "$cal_dir"
+chmod 666 "$cal_dir/targets.json"
+docker run --rm --network givemeanoffer_proxy --memory 384m -v "$cal_dir:/cal" \
   ghcr.io/hollowkaeden/loadgen-web:latest \
   calibrate -targets /cal/targets.json -domain givemeanoffer.ru -start 2
 ```
 
 Результат переносится в [deploy/loadgen/targets.json](deploy/loadgen/targets.json) и коммитится.
-Сейчас: главная 363 rps, список книг 60, список рецептов Фудграма 7.
+
+5 ноября 2026, после добавления Kafka и billing, выполнена повторная калибровка:
+
+| Цель | Прежний max_rps | Новый max_rps | p99 последней прошедшей ступени | Первая непройденная ступень | Потолок формы (50%) |
+|---|---:|---:|---:|---:|---:|
+| Главная | 363 | 247 | 8,1 мс | 309 RPS | 123 RPS |
+| Список книг | 60 | 38 | 36,2 мс | 48 RPS | 19 RPS |
+| Рецепты Фудграма | 7 | 9 | 299,9 мс | 12 RPS | 4 RPS |
+
+Генератор работает на том же 1 vCPU и ходит через TLS и Caddy по внутренним алиасам.
+Ступени по 10 с, пауза 5 с, рост в 1,25 раза; p99 ≤ 500 мс, ошибок < 1%, фактическая
+скорость ≥ 90% заданной. Это последние прошедшие ступени, точная граница между ними не измерялась.
+Первый замер книг остановился уже на начальных 10 RPS (p99 727,9 мс); после завершения
+серии повтор с 2 RPS дошёл до 38 RPS. Причина первого выброса не установлена.
+Оба результата и параметры сохранены в [полном выводе калибровки](docs/loadgen/2026-11-05.txt).
+RPS в форме и сервисе округляется вниз: 50% от 9 — это 4, а не 5 запросов/с.
+Если даже 1 RPS выше потолка доли, цель не показывается и запустить её нельзя.
+ПВЗ в белый список не добавлен: его API требует авторизации.
+
+В двух сериях available не опускалось ниже 768 МиБ, swap занимал не больше 144 МиБ из 2047.
+Пики рабочего набора по выборкам каждые 2 с: Caddy 111,9 МиБ, Kafka 462,6, pvz 9,3, billing 22,8.
+Проверка cgroup показала, что Caddy достигал лимита 128 МиБ без OOM; в Compose лимит поднят
+до 192 МиБ, `GOMEMLIMIT=160MiB`. Лимиты pvz/billing/Kafka 128/64/512 МиБ сохранены.
+Замеры сделаны до публикации новой карточки и изменения лимита Caddy: после CI и деплоя
+нужно проверить ресурсы и контрольной калибровкой подтвердить главную с новым HTML.

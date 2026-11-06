@@ -4,19 +4,19 @@
       "id": "portfolio-home",
       "title": "Главная этого сайта",
       "url": "https://{domain}/",
-      "max_rps": 363
+      "max_rps": 247
     },
     {
       "id": "books-list",
       "title": "Мои книги: список книг (API)",
       "url": "https://books.{domain}/api/books",
-      "max_rps": 60
+      "max_rps": 38
     },
     {
       "id": "foodgram-recipes",
       "title": "Фудграм: список рецептов (API)",
       "url": "https://foodgram.{domain}/api/recipes/",
-      "max_rps": 7
+      "max_rps": 9
     }
   ]
 }

@@ -1,0 +1,136 @@
+Калибровка 2026-11-05: после добавления Kafka и billing.
+VPS: Ubuntu 24.04, 1 vCPU, 1968 MiB RAM. Генератор на том же ядре.
+Клиент: штатный CI-образ loadgen-web (f8bded1), сеть givemeanoffer_proxy.
+Цели: настоящий HTTPS через внутренние алиасы Caddy, только разрешённые GET.
+pvz/billing: f54b589, portfolio/config: 35bb707. Во время замера деплоев не было.
+Порог: p99 <= 500 ms, ошибок < 1%, фактический RPS >= 90% заданного.
+Ступень 10s, пауза 5s, множитель 1.25, таймаут 5s, до 512 воркеров.
+Старт: главная 100 RPS, книги сначала 10 RPS, Фудграм 2 RPS.
+Контроль: available >= 500 MiB, отсутствие параллельного публичного прогона;
+health всех приложений до/после каждой цели. Конфигурация прода не менялась.
+
+Первый замер книг остановился на начальных 10 RPS: p99 727.9 ms.
+После завершения всей серии книги повторно откалиброваны с 2 RPS.
+Причина первого выброса не установлена; отрицательный результат сохранён ниже.
+Итоговые max_rps: portfolio-home=247, books-list=38, foodgram-recipes=9.
+Это последние прошедшие ступени, а не непрерывный поиск точной границы.
+После округления вниз потолок формы 50%: 123 / 19 / 4 RPS.
+
+Пределы памяти в этом замере: Caddy128 / pvz128 / billing64 / Kafka512 MiB.
+Новая карточка сайта и лимит Caddy192 MiB (GOMEMLIMIT160MiB) ещё не опубликованы;
+после CI/деплоя нужна контрольная калибровка главной и проверка новых лимитов.
+RESOURCES ниже: каждые 2s /proc/meminfo, /proc/vmstat и cgroup memory.current
+минус inactive_file (как working set docker stats). Пики между выборками возможны.
+Счётчики swap_in_pages/swap_out_pages: страницы по 4 KiB, суммарно за серию.
+
+=== ПЕРВАЯ СЕРИЯ ===
+SCRATCH /tmp/pvz-step18-cal-v_bih09u
+
+== portfolio-home (https://givemeanoffer.ru/)
+     rps   факт rps   ошибок    p95 мс    p99 мс  итог
+     100      100.0    0.00%       4.7     262.1  ok
+     125      124.8    0.00%       4.3      12.4  ok
+     157      156.5    0.00%       3.7     102.8  ok
+     197      196.8    0.00%      15.5      63.7  ok
+     247      246.5    0.00%       4.1       8.1  ok
+     309      253.6    0.00%    2382.7    2923.1  стоп: p99 2923 мс
+max_rps = 247
+
+записано в /cal/targets.json
+
+HEALTH OK portfolio-home
+
+== books-list (https://books.givemeanoffer.ru/api/books)
+     rps   факт rps   ошибок    p95 мс    p99 мс  итог
+      10       10.1    0.00%     355.9     727.9  стоп: p99 728 мс
+max_rps = 0
+
+записано в /cal/targets.json
+
+HEALTH OK books-list
+
+== foodgram-recipes (https://foodgram.givemeanoffer.ru/api/recipes/)
+     rps   факт rps   ошибок    p95 мс    p99 мс  итог
+       2        2.1    0.00%      97.1     110.6  ok
+       3        3.1    0.00%     384.0     412.7  ok
+       4        4.1    0.00%     150.6     179.8  ok
+       5        5.0    0.00%     102.7     109.4  ok
+       7        7.1    0.00%     144.4     235.5  ok
+       9        9.1    0.00%     218.8     299.9  ok
+      12        8.8    0.00%    2141.1    2235.0  стоп: p99 2235 мс
+max_rps = 9
+
+записано в /cal/targets.json
+
+HEALTH OK foodgram-recipes
+RESOURCES {"seconds": 215, "samples": 108, "min_available_MiB": 768.13, "max_swap_MiB": 143.85, "swap_in_pages": 1848, "swap_out_pages": 306, "peak_working_MiB": {"billing": 21.82, "bookreviews": 41.38, "caddy": 111.91, "foodgram-backend": 155.77, "foodgram-gateway": 1.09, "kafka": 462.63, "loadgen-web": 1.84, "postgres": 61.29, "pvz": 7.96}}
+TARGETS {
+  "targets": [
+    {
+      "id": "portfolio-home",
+      "title": "Главная этого сайта",
+      "url": "https://{domain}/",
+      "max_rps": 247
+    },
+    {
+      "id": "books-list",
+      "title": "Мои книги: список книг (API)",
+      "url": "https://books.{domain}/api/books",
+      "max_rps": 0
+    },
+    {
+      "id": "foodgram-recipes",
+      "title": "Фудграм: список рецептов (API)",
+      "url": "https://foodgram.{domain}/api/recipes/",
+      "max_rps": 9
+    }
+  ]
+}
+
+
+=== ПОВТОР КНИГ С 2 RPS ===
+SCRATCH /tmp/pvz-step18-cal-cl2ofvcg
+
+== books-list (https://books.givemeanoffer.ru/api/books)
+     rps   факт rps   ошибок    p95 мс    p99 мс  итог
+       2        2.1    0.00%      31.5     190.8  ok
+       3        3.1    0.00%      24.2      39.6  ok
+       4        4.1    0.00%      28.5      40.5  ok
+       5        5.1    0.00%      23.0      26.4  ok
+       7        7.1    0.00%      23.5      30.4  ok
+       9        9.1    0.00%      21.3      49.5  ok
+      12       12.1    0.00%      19.8      26.2  ok
+      15       15.1    0.00%      25.9      30.9  ok
+      19       19.1    0.00%      20.5      34.6  ok
+      24       24.1    0.00%      19.3      26.3  ok
+      30       30.1    0.00%      16.9      34.0  ok
+      38       38.0    0.00%      21.6      36.2  ok
+      48       37.8    0.00%    3384.0    3748.3  стоп: p99 3748 мс
+max_rps = 38
+
+записано в /cal/targets.json
+HEALTH OK books-list
+RESOURCES {"seconds": 195, "samples": 98, "min_available_MiB": 780.75, "max_swap_MiB": 143.35, "swap_in_pages": 10471, "swap_out_pages": 0, "peak_working_MiB": {"billing": 22.75, "bookreviews": 85.3, "caddy": 81.07, "foodgram-backend": 155.8, "foodgram-gateway": 0.83, "kafka": 461.21, "loadgen-web": 6.05, "postgres": 73.46, "pvz": 9.25}}
+TARGETS {
+  "targets": [
+    {
+      "id": "portfolio-home",
+      "title": "Главная этого сайта",
+      "url": "https://{domain}/",
+      "max_rps": 363
+    },
+    {
+      "id": "books-list",
+      "title": "Мои книги: список книг (API)",
+      "url": "https://books.{domain}/api/books",
+      "max_rps": 38
+    },
+    {
+      "id": "foodgram-recipes",
+      "title": "Фудграм: список рецептов (API)",
+      "url": "https://foodgram.{domain}/api/recipes/",
+      "max_rps": 7
+    }
+  ]
+}
+

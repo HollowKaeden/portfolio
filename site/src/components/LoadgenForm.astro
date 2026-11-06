@@ -170,7 +170,7 @@
     }
 
     function targetRps(t: Target, sharePct: number) {
-      return Math.max(1, Math.round((t.max_rps * sharePct) / 100));
+      return Math.max(1, Math.floor((t.max_rps * sharePct) / 100));
     }
 
     function renderTargets(data: Targets) {

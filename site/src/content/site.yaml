@@ -57,6 +57,22 @@ projects:
     thumb: ../assets/projects/foodgram-thumb.png
     demo: { type: link, subdomain: foodgram }
 
+  - slug: pvz-service
+    title: ПВЗ-сервис
+    summary: Приёмка товаров на ПВЗ и начисления через Kafka
+    description: >-
+      Сервис для сотрудников пунктов выдачи: открываешь приёмку, добавляешь товары,
+      при необходимости удаляешь последний и закрываешь. После закрытия отдельный
+      сервис начисляет оплату через Kafka, а панель показывает баланс и время доставки
+      события. В демо можно выбрать роль без регистрации и пройти весь сценарий;
+      каждый запрос к API виден в журнале. Решение открытого тестового задания Авито,
+      дополненное фронтендом и сервисом начислений. Данные сбрасываются каждую ночь.
+    stack: [Go, PostgreSQL, pgx, gRPC, Kafka, Prometheus, Docker, GitHub Actions]
+    repo: https://github.com/HollowKaeden/pvz-service
+    preview: ../assets/projects/pvz-service.png
+    thumb: ../assets/projects/pvz-service-thumb.png
+    demo: { type: link, subdomain: pvz }
+
   - slug: http-loadgen
     title: Генератор нагрузки
     summary: Генератор HTTP-нагрузки на Go с перцентилями латентности
