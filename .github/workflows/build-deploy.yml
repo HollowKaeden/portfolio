@@ -36,6 +36,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Validate Prometheus config
+        run: |
+          # Версия берётся из compose, чтобы promtool проверял именно продовый формат.
+          image=$(docker compose --env-file deploy/.env.example -f deploy/compose.yaml config --no-interpolate --format json |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["prometheus"]["image"])')
+          docker run --rm --entrypoint /bin/promtool \
+            --mount "type=bind,source=$PWD/deploy/prometheus,target=/etc/prometheus,readonly" \
+            "$image" check config /etc/prometheus/prometheus.yml
+
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
@@ -103,7 +112,11 @@ jobs:
             # только на пустом volume, а новые проекты добавляются на живой сервер.
             docker compose up -d --wait postgres
             docker compose exec -T postgres sh /docker-entrypoint-initdb.d/10-databases.sh
+            docker compose run --rm --no-deps --entrypoint /bin/promtool prometheus check config /etc/prometheus/prometheus.yml
             docker compose up -d --remove-orphans
+            docker compose up -d --wait --wait-timeout 120 prometheus
+            # Каталог конфигурации видит файлы после rsync; HTTP lifecycle API не открываем.
+            docker compose kill -s SIGHUP prometheus
             # Caddyfile мог поменяться без пересоздания контейнера
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
             # loadgen-web читает targets.json только при старте (max_rps мог поменяться)
@@ -130,6 +143,9 @@ jobs:
           check "https://pvz.$DOMAIN/health" 200   # заодно проверяет связь с БД
           check "https://pvz.$DOMAIN/billing/health" 200
           check "https://pvz.$DOMAIN/docs/" 200
+
+      - name: Prometheus targets
+        run: ssh vps "python3 $APP_DIR/prometheus-check.py"
 
       - name: Logs on failure
         if: failure()

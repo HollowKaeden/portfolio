@@ -1,0 +1,23 @@
+# Продовый сбор: локальная конфигурация pvz-service остаётся отдельной.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 5s
+  evaluation_interval: 30s
+  sample_limit: 5000
+
+storage:
+  tsdb:
+    retention:
+      time: 7d
+      size: 512MB
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: pvz
+    static_configs:
+      - targets: ["pvz:9000"]
+  - job_name: billing
+    static_configs:
+      - targets: ["billing:9001"]

@@ -105,6 +105,8 @@ deploy/                       всё, что копируется на серв�
   caddy/Caddyfile             роутинг по именам хостов
   postgres/init/              создание БД и ролей проектов
   loadgen/targets.json        белый список целей формы нагрузки и их max_rps
+  prometheus/prometheus.yml   продовый сбор метрик ПВЗ, billing и самого Prometheus
+  prometheus-check.py         проверка реального сбора после деплоя
   .env.example                переменные окружения (секреты только на сервере)
   bootstrap-server.sh         первичная настройка чистого VPS
   backup.sh                   ежедневный бэкап, локально и в Yandex Object Storage
@@ -192,13 +194,67 @@ docker compose exec foodgram-backend python manage.py createsuperuser
 | ручной запуск | сразу деплой |
 
 Деплой не стартует при упавшей сборке, прогоны идут строго по очереди. После `up -d` workflow
-перечитывает Caddyfile, перезапускает `loadgen-web` (он читает `targets.json` при старте) и проверяет
+перечитывает Caddyfile и конфигурацию Prometheus, перезапускает `loadgen-web` (он читает `targets.json` при старте) и проверяет
 главную, редирект с `www`, `/health` и `/ready` BookReviews, API Фудграма, `/loadgen/api/status`,
-`/health` и Swagger UI ПВЗ-сервиса.
+`/health` и Swagger UI ПВЗ-сервиса. Конфигурация Prometheus проверяется `promtool` до сборки сайта
+и на сервере; деплой завершается успешно после проверки целей и поступления метрик.
 При провале печатает `docker compose ps` и логи.
 
 Откат на конкретную версию: указать в `.env` тег образа (`PORTFOLIO_TAG`, `BOOKREVIEWS_TAG`,
 `FOODGRAM_TAG`, `LOADGEN_TAG`, `PVZ_TAG`) равным sha коммита и сделать `docker compose up -d`.
+
+### Prometheus
+
+Prometheus собирает метрики `pvz:9000`, `billing:9001` и самого себя каждые 30 секунд.
+На VPS он живёт в сети `proxy`, к сети БД не подключён. Интерфейс и API опубликованы только
+на `127.0.0.1:9090` сервера, публичного маршрута Caddy нет. Чтобы открыть интерфейс с компьютера:
+
+```bash
+ssh -N -L 127.0.0.1:19090:127.0.0.1:9090 deploy@<IP_сервера>
+```
+
+Пока туннель работает, откройте http://127.0.0.1:19090/.
+Порт 19090 на компьютере позволяет одновременно использовать локальный Prometheus ПВЗ на 9090.
+
+Настройки находятся в [deploy/prometheus/prometheus.yml](deploy/prometheus/prometheus.yml).
+История хранится в volume `prometheus_data`: до 7 дней или до достижения целевого размера 512 МиБ,
+в зависимости от того, что наступит раньше. Retention удаляет старые блоки; WAL, текущие данные
+и компактация требуют дополнительного места. Это не жёсткая квота на размер volume.
+История сохраняется при пересоздании контейнера и обычном деплое; в бэкап проекта не входит.
+
+Лимит контейнера — 192 МиБ; автоматический лимит Go — 80% от него. Одновременно выполняются
+не больше двух запросов, таймаут — 10 с, до 500 тысяч samples на запрос. Сбор ограничен
+5000 samples с одной цели за опрос. После первого деплоя нужно проверить фактическое потребление:
+на VPS под нагрузкой должно оставаться не менее 500 МиБ available RAM, без OOM и постоянной подкачки.
+
+Конфигурация смонтирована каталогом, чтобы `rsync` мог заменять файлы. Для ручного применения
+на сервере после проверки конфигурации:
+
+```bash
+cd /opt/givemeanoffer
+docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
+docker compose kill -s SIGHUP prometheus
+python3 prometheus-check.py
+```
+
+Проверка ждёт до 120 секунд: Prometheus должен быть готов, все цели — `up`, последнее чтение
+конфигурации — успешным, а метрики ПВЗ и billing — присутствовать в хранилище.
+Изменения параметров контейнера в `compose.yaml` применяются обычным деплоем через `up -d`.
+
+Примеры PromQL:
+
+```promql
+up{job=~"pvz|billing"}
+sum(rate(pvz_http_request_duration_seconds_count[5m]))
+histogram_quantile(0.99, sum by (le) (rate(pvz_http_request_duration_seconds_bucket[5m])))
+pvz_outbox_pending
+billing_consumer_lag
+billing_dlq_size
+```
+
+Версия образа закреплена: [Prometheus 3.16.0](https://github.com/prometheus/prometheus/releases/tag/v3.16.0).
+Параметры сверены с [документацией конфигурации](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)
+и [хранения](https://prometheus.io/docs/prometheus/latest/storage/). Локальная конфигурация `pvz-service` отдельная.
 
 ### Бэкапы
 

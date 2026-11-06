@@ -30,7 +30,7 @@ setup_base() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -q
   apt-get upgrade -yq
-  apt-get install -yq ca-certificates curl ufw unattended-upgrades cron
+  apt-get install -yq ca-certificates curl ufw unattended-upgrades cron python3
 
   log "Часовой пояс $TIMEZONE"
   timedatectl set-timezone "$TIMEZONE"
