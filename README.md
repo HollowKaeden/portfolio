@@ -105,7 +105,10 @@ deploy/                       всё, что копируется на серв�
   caddy/Caddyfile             роутинг по именам хостов
   postgres/init/              создание БД и ролей проектов
   loadgen/targets.json        белый список целей формы нагрузки и их max_rps
-  prometheus/prometheus.yml   продовый сбор метрик ПВЗ, billing и самого Prometheus
+  prometheus/prometheus.yml   сбор метрик приложений, хоста, HTTPS и бэкапов
+  blackbox/blackbox.yml       HTTPS-проверки и проверка сертификатов
+  monitoring-prepare.py      цели HTTPS из DOMAIN и начальное состояние метрик бэкапа
+  backup-metrics.py          атомарная публикация результата backup.sh
   prometheus-check.py         проверка реального сбора после деплоя
   .env.example                переменные окружения (секреты только на сервере)
   bootstrap-server.sh         первичная настройка чистого VPS
@@ -194,10 +197,11 @@ docker compose exec foodgram-backend python manage.py createsuperuser
 | ручной запуск | сразу деплой |
 
 Деплой не стартует при упавшей сборке, прогоны идут строго по очереди. После `up -d` workflow
-перечитывает Caddyfile и конфигурацию Prometheus, перезапускает `loadgen-web` (он читает `targets.json` при старте) и проверяет
+перечитывает Caddyfile, конфигурации Prometheus и Blackbox Exporter, перезапускает `loadgen-web` (он читает `targets.json` при старте) и проверяет
 главную, редирект с `www`, `/health` и `/ready` BookReviews, API Фудграма, `/loadgen/api/status`,
 `/health` и Swagger UI ПВЗ-сервиса. Конфигурация Prometheus проверяется `promtool` до сборки сайта
-и на сервере; деплой завершается успешно после проверки целей и поступления метрик.
+и на сервере. Blackbox Exporter проверяет свой конфиг через `--config.check`.
+Деплой завершается успешно после проверки целей, HTTPS-проб и поступления метрик.
 При провале печатает `docker compose ps` и логи.
 
 Откат на конкретную версию: указать в `.env` тег образа (`PORTFOLIO_TAG`, `BOOKREVIEWS_TAG`,
@@ -205,9 +209,9 @@ docker compose exec foodgram-backend python manage.py createsuperuser
 
 ### Prometheus
 
-Prometheus собирает метрики `pvz:9000`, `billing:9001` и самого себя каждые 30 секунд.
-На VPS он живёт в сети `proxy`, к сети БД не подключён. Интерфейс и API опубликованы только
-на `127.0.0.1:9090` сервера, публичного маршрута Caddy нет. Чтобы открыть интерфейс с компьютера:
+Prometheus собирает метрики `pvz:9000`, `billing:9001`, самого себя и двух экспортёров каждые
+30 секунд. На VPS он подключён к сетям `proxy` и `monitoring`. Интерфейс и API опубликованы
+на `127.0.0.1:9090` сервера. Открыть интерфейс с компьютера можно через SSH-туннель.
 
 ```bash
 ssh -N -L 127.0.0.1:19090:127.0.0.1:9090 deploy@<IP_сервера>
@@ -227,21 +231,28 @@ ssh -N -L 127.0.0.1:19090:127.0.0.1:9090 deploy@<IP_сервера>
 5000 samples с одной цели за опрос. После первого деплоя нужно проверить фактическое потребление:
 на VPS под нагрузкой должно оставаться не менее 500 МиБ available RAM, без OOM и постоянной подкачки.
 
-Конфигурация смонтирована каталогом, чтобы `rsync` мог заменять файлы. Для ручного применения
-на сервере после проверки конфигурации:
+Конфигурация смонтирована каталогом, чтобы `rsync` мог заменять файлы. Перед запуском Compose
+`monitoring-prepare.py` создаёт семь HTTPS-целей из серверного `DOMAIN` и начальный файл метрик
+бэкапа. Генерируемые файлы находятся в `backups/`, который сохраняется при `rsync --delete`.
+При ручном применении на сервере выполните следующие команды.
 
 ```bash
 cd /opt/givemeanoffer
+python3 monitoring-prepare.py
+docker compose run --rm --no-deps blackbox-exporter --config.file=/etc/blackbox/blackbox.yml --config.check
 docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
+docker compose up -d --wait node-exporter blackbox-exporter prometheus
+docker compose kill -s SIGHUP blackbox-exporter
 docker compose kill -s SIGHUP prometheus
 python3 prometheus-check.py
 ```
 
-Проверка ждёт до 120 секунд: Prometheus должен быть готов, все цели — `up`, последнее чтение
-конфигурации — успешным, а метрики ПВЗ и billing — присутствовать в хранилище.
+Проверка ждёт до 120 секунд. Prometheus должен быть готов, все 12 целей должны иметь `up=1`,
+конфигурация должна успешно загрузиться, а метрики приложений, хоста и бэкапа должны поступать.
+Для всех семи HTTPS-целей дополнительно проверяются `probe_success=1` и срок сертификата.
 Изменения параметров контейнера в `compose.yaml` применяются обычным деплоем через `up -d`.
 
-Примеры PromQL:
+Примеры PromQL для приложений.
 
 ```promql
 up{job=~"pvz|billing"}
@@ -255,6 +266,64 @@ billing_dlq_size
 Версия образа закреплена: [Prometheus 3.16.0](https://github.com/prometheus/prometheus/releases/tag/v3.16.0).
 Параметры сверены с [документацией конфигурации](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)
 и [хранения](https://prometheus.io/docs/prometheus/latest/storage/). Локальная конфигурация `pvz-service` отдельная.
+
+### Хост и HTTPS
+
+Node Exporter получает `/proc`, `/sys` и корень VPS через read-only mounts. Включены коллекторы
+CPU, meminfo, filesystem, loadavg, vmstat, diskstats и textfile. Корневой диск имеет метку
+`mountpoint="/"`. Виртуальные mount points и каталоги Docker исключены из файловых систем.
+Blackbox Exporter проверяет главную, редирект `www` с кодом 301, BookReviews `/ready`, список
+рецептов, статус loadgen, health ПВЗ и billing. Остальные проверки требуют код 200.
+Все пробы требуют HTTPS с проверкой цепочки сертификата и выполняются раз в минуту.
+Редиректы не проходят автоматически, поэтому неожиданный переход на другой URL виден как ошибка.
+
+Оба экспортёра доступны в отдельной сети `monitoring`. Blackbox использует публичные DNS-имена
+и адрес VPS, поэтому проверяет также DNS, TLS и вход через Caddy. Интервал — 60 секунд,
+таймаут пробы — 5 секунд. У каждого экспортёра лимит 64 МиБ и `GOMEMLIMIT=48MiB`.
+
+```promql
+100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])))
+node_memory_MemAvailable_bytes / 1024^2
+node_filesystem_avail_bytes{mountpoint="/"} / 1024^3
+probe_success{job="https"}
+(probe_ssl_earliest_cert_expiry{job="https"} - time()) / 86400
+```
+
+Закреплены версии [Node Exporter 1.12.1](https://github.com/prometheus/node_exporter/releases/tag/v1.12.1)
+и [Blackbox Exporter 0.29.1](https://github.com/prometheus/blackbox_exporter/releases/tag/v0.29.1).
+
+### Метрики бэкапа
+
+`backup.sh` держит `flock` на всё время работы. Повторный одновременный запуск завершается с кодом 1
+и сохраняет метрики текущего запуска. `backup-metrics.py` атомарно заменяет `backups/metrics/backup.prom`.
+Каталог бэкапов имеет права 0700, в Node Exporter смонтирован только подкаталог с числовыми метриками.
+
+| Метрика с префиксом `givemeanoffer_backup_` | Значение |
+|---|---|
+| `last_attempt_timestamp_seconds` | начало последней попытки, Unix time |
+| `last_success_timestamp_seconds` | завершение последней полностью успешной копии, Unix time |
+| `last_run_success` | результат последнего завершённого запуска, 1 или 0 |
+| `last_run_duration_seconds` | длительность последнего завершённого запуска |
+| `in_progress` | запуск начался и ещё не сообщил о завершении |
+
+Успех требует дампа, медиа, внешней копии restic, её ротации и наличия эталона Фудграма.
+При ошибке сохраняется прежний `last_success_timestamp_seconds` и исходный код выхода бэкапа.
+Обработчик завершения записывает неуспех и при SIGINT/SIGTERM. После SIGKILL или потери питания
+`in_progress=1` остаётся до следующего запуска. Ошибка публикации метрик записывается в лог.
+
+При первом деплое все значения равны нулю до первого наблюдаемого запуска. История из старых
+логов не переносится. Успешный деплой требует наличия этих метрик, первый успешный бэкап
+проверяется после штатного ночного запуска. Повторные деплои сохраняют результат.
+
+```promql
+givemeanoffer_backup_last_run_success
+givemeanoffer_backup_in_progress
+time() - givemeanoffer_backup_last_success_timestamp_seconds
+node_textfile_scrape_error
+```
+
+Регрессионные тесты запускаются в Linux командой `python3 -m unittest discover -s tests -v`.
+Они исполняют `backup.sh` с подставным Docker в отдельном временном каталоге.
 
 ### Бэкапы
 

@@ -188,6 +188,7 @@ services:
     volumes:
       # rsync заменяет файлы: монтируем каталог, затем перечитываем через SIGHUP.
       - ./prometheus:/etc/prometheus:ro
+      - ./backups/monitoring:/etc/prometheus-targets:ro
       - prometheus_data:/prometheus
     read_only: true
     cap_drop: [ALL]
@@ -202,6 +203,63 @@ services:
     mem_limit: 192m
     networks:
       - proxy
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.meminfo
+      - --collector.filesystem
+      - --collector.loadavg
+      - --collector.vmstat
+      - --collector.diskstats
+      - --collector.textfile
+      - --collector.textfile.directory=/textfile
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker|var/lib/containerd)($$|/)
+    environment:
+      GOMEMLIMIT: 48MiB
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+      - ./backups/metrics:/textfile:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9100/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 64m
+    networks:
+      - monitoring
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.29.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    environment:
+      GOMEMLIMIT: 48MiB
+    volumes:
+      - ./blackbox:/etc/blackbox:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9115/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 64m
+    networks:
+      - monitoring
 
   # ПВЗ-сервис (Go, distroless). Миграции при старте. Демо публичное: данные
   # сбрасываются каждую ночь (pvz-reset.sh), в бэкап не входят.
@@ -310,6 +368,8 @@ volumes:
   foodgram_media: # картинки рецептов и аватары; каждую ночь сбрасываются к эталону (foodgram-reset.sh)
 
 networks:
+  # Blackbox использует публичный DNS. Алиасы Caddy из proxy здесь отсутствуют.
+  monitoring:
   proxy:
     ipam:
       config:

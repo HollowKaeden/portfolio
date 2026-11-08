@@ -1,0 +1,19 @@
+modules:
+  https_200:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      follow_redirects: false
+      fail_if_not_ssl: true
+  https_redirect:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [301]
+      follow_redirects: false
+      fail_if_not_ssl: true

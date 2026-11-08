@@ -11,7 +11,7 @@
 set -euo pipefail
 umask 077 # дампы содержат данные: читать может только владелец
 
-APP_DIR=/opt/givemeanoffer
+APP_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 BACKUP_DIR=$APP_DIR/backups
 SEED_DIR=$BACKUP_DIR/foodgram-seed # эталон Фудграма, снимает foodgram-reset.sh snapshot
 KEEP_LOCAL=7
@@ -19,10 +19,39 @@ RESTIC_IMAGE=restic/restic:0.19.1
 PROJECT=givemeanoffer
 
 cd "$APP_DIR"
-set -a; . ./.env; set +a
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*"; }
 compose() { docker compose --project-directory "$APP_DIR" "$@"; }
+
+mkdir -p "$BACKUP_DIR"
+exec 9>"$BACKUP_DIR/backup.lock"
+if ! flock -n 9; then
+  log "бэкап уже выполняется, второй запуск пропущен"
+  exit 1
+fi
+
+started_seconds=$SECONDS
+publish_metrics() {
+  python3 "$APP_DIR/backup-metrics.py" "$@" || log "ОШИБКА: не удалось записать метрики бэкапа"
+}
+finish_backup() {
+  local status=$?
+  local success=0
+  trap - EXIT
+  if [ "$status" -eq 0 ]; then
+    success=1
+  fi
+  publish_metrics finish --success "$success" --duration "$((SECONDS - started_seconds))"
+  exit "$status"
+}
+trap finish_backup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+publish_metrics start
+
+set -a
+. ./.env
+set +a
 
 ts=$(date +%F_%H%M)
 dir=$BACKUP_DIR/$ts

@@ -10,12 +10,24 @@ import urllib.parse
 import urllib.request
 
 
+REQUIRED_PROJECTS = {
+    "portfolio", "www", "bookreviews", "foodgram", "http-loadgen", "pvz-service", "billing",
+}
+
+
 def api(base, path):
     with urllib.request.urlopen(base + "/api/v1/" + path, timeout=5) as response:
         result = json.load(response)
     if result.get("status") != "success":
         raise ValueError(result.get("error", "Prometheus API error"))
     return result["data"]
+
+
+def query(base, expression):
+    data = api(base, "query?" + urllib.parse.urlencode({"query": expression}))
+    if data["resultType"] != "vector" or not data["result"]:
+        raise ValueError("No samples for " + expression)
+    return data["result"]
 
 
 def check(base):
@@ -25,7 +37,7 @@ def check(base):
 
     targets = api(base, "targets")["activeTargets"]
     jobs = {target["labels"].get("job") for target in targets}
-    missing = {"prometheus", "pvz", "billing"} - jobs
+    missing = {"prometheus", "pvz", "billing", "node-exporter", "blackbox-exporter", "https"} - jobs
     if missing:
         raise ValueError("Missing targets: " + ", ".join(sorted(missing)))
     failed = [
@@ -43,12 +55,36 @@ def check(base):
     for expression in [
         'pvz_outbox_pending{job="pvz"}',
         'billing_dlq_size{job="billing"}',
+        'node_cpu_seconds_total{job="node-exporter"}',
+        'node_memory_MemAvailable_bytes{job="node-exporter"}',
+        'node_filesystem_avail_bytes{job="node-exporter",mountpoint="/"}',
+        'givemeanoffer_backup_last_success_timestamp_seconds{job="node-exporter"}',
+        'givemeanoffer_backup_last_attempt_timestamp_seconds{job="node-exporter"}',
+        'givemeanoffer_backup_last_run_success{job="node-exporter"}',
+        'givemeanoffer_backup_last_run_duration_seconds{job="node-exporter"}',
+        'givemeanoffer_backup_in_progress{job="node-exporter"}',
     ]:
-        data = api(base, "query?" + urllib.parse.urlencode({"query": expression}))
-        if data["resultType"] != "vector" or not data["result"]:
-            raise ValueError("No samples for " + expression)
+        query(base, expression)
 
-    print(f"Prometheus OK: {len(targets)} targets up, reload successful, pvz/billing samples present")
+    for expression, expected in [
+        ('node_textfile_scrape_error{job="node-exporter"}', 0),
+        ('node_scrape_collector_success{job="node-exporter"}', 1),
+        ('blackbox_exporter_config_last_reload_successful{job="blackbox-exporter"}', 1),
+    ]:
+        if any(float(sample["value"][1]) != expected for sample in query(base, expression)):
+            raise ValueError("Exporter check failed for " + expression)
+
+    for metric, threshold in [("probe_success", 1), ("probe_ssl_earliest_cert_expiry", time.time())]:
+        results = query(base, metric + '{job="https"}')
+        projects = {sample["metric"].get("project") for sample in results}
+        missing = REQUIRED_PROJECTS - projects
+        if missing:
+            raise ValueError("Missing HTTPS probes for " + ", ".join(sorted(missing)))
+        failed = [sample["metric"]["project"] for sample in results if float(sample["value"][1]) < threshold]
+        if failed:
+            raise ValueError("HTTPS or certificate check failed for " + ", ".join(sorted(failed)))
+
+    print(f"Prometheus OK. All {len(targets)} targets up. App, host, HTTPS and backup metrics present.")
 
 
 def main():

@@ -9,6 +9,7 @@ on:
     paths:
       - site/**
       - deploy/**
+      - tests/**
       - Dockerfile
       - .dockerignore
       - .github/workflows/**
@@ -36,14 +37,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Validate Prometheus config
+      - name: Monitoring tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Validate monitoring configs
         run: |
+          python3 deploy/monitoring-prepare.py --domain "$DOMAIN"
           # Версия берётся из compose, чтобы promtool проверял именно продовый формат.
           image=$(docker compose --env-file deploy/.env.example -f deploy/compose.yaml config --no-interpolate --format json |
             python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["prometheus"]["image"])')
           docker run --rm --entrypoint /bin/promtool \
             --mount "type=bind,source=$PWD/deploy/prometheus,target=/etc/prometheus,readonly" \
+            --mount "type=bind,source=$PWD/deploy/backups/monitoring,target=/etc/prometheus-targets,readonly" \
             "$image" check config /etc/prometheus/prometheus.yml
+          image=$(docker compose --env-file deploy/.env.example -f deploy/compose.yaml config --no-interpolate --format json |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["blackbox-exporter"]["image"])')
+          docker run --rm \
+            --mount "type=bind,source=$PWD/deploy/blackbox,target=/etc/blackbox,readonly" \
+            "$image" --config.file=/etc/blackbox/blackbox.yml --config.check
 
       - uses: docker/setup-buildx-action@v4
 
@@ -107,13 +118,17 @@ jobs:
           ssh vps "set -e
             cd $APP_DIR
             test -f .env || { echo 'нет $APP_DIR/.env, скопируйте из .env.example'; exit 1; }
+            python3 monitoring-prepare.py
             docker compose pull --quiet
             # Сначала Postgres и роли/БД проектов: init-скрипт сам по себе выполняется
             # только на пустом volume, а новые проекты добавляются на живой сервер.
             docker compose up -d --wait postgres
             docker compose exec -T postgres sh /docker-entrypoint-initdb.d/10-databases.sh
             docker compose run --rm --no-deps --entrypoint /bin/promtool prometheus check config /etc/prometheus/prometheus.yml
+            docker compose run --rm --no-deps blackbox-exporter --config.file=/etc/blackbox/blackbox.yml --config.check
             docker compose up -d --remove-orphans
+            docker compose up -d --wait --wait-timeout 120 node-exporter blackbox-exporter
+            docker compose kill -s SIGHUP blackbox-exporter
             docker compose up -d --wait --wait-timeout 120 prometheus
             # Каталог конфигурации видит файлы после rsync; HTTP lifecycle API не открываем.
             docker compose kill -s SIGHUP prometheus
