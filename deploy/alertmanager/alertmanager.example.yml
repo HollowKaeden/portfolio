@@ -1,0 +1,29 @@
+global:
+  smtp_smarthost: postbox.cloud.yandex.net:465
+  smtp_from: alerts@example.invalid
+  smtp_auth_username: example-postbox-key-id
+  smtp_auth_password_file: /etc/alertmanager/postbox.key
+  smtp_require_tls: true
+
+route:
+  receiver: postbox
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 24h
+
+receivers:
+  - name: postbox
+    email_configs:
+      - to: owner@example.invalid
+        send_resolved: true
+        force_implicit_tls: true
+        headers:
+          Subject: '[givemeanoffer] {{ if eq .Status "resolved" }}Восстановлено{{ else }}Проблема{{ end }} · {{ .CommonLabels.alertname }}'
+        text: |-
+          {{ range .Alerts -}}
+          {{ .Annotations.summary }}
+          {{ if eq .Status "firing" -}}
+          {{ .Annotations.description }}
+          {{ end -}}
+          {{ end -}}

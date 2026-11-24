@@ -50,6 +50,15 @@ jobs:
             --mount "type=bind,source=$PWD/deploy/prometheus,target=/etc/prometheus,readonly" \
             --mount "type=bind,source=$PWD/deploy/backups/monitoring,target=/etc/prometheus-targets,readonly" \
             "$image" check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint /bin/promtool \
+            --mount "type=bind,source=$PWD/deploy/prometheus,target=/etc/prometheus,readonly" \
+            --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+            "$image" test rules /tests/alert-rules.test.yml
+          image=$(docker compose --env-file deploy/.env.example -f deploy/compose.yaml config --no-interpolate --format json |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["alertmanager"]["image"])')
+          docker run --rm --entrypoint /bin/amtool \
+            --mount "type=bind,source=$PWD/deploy/alertmanager,target=/etc/alertmanager,readonly" \
+            "$image" check-config /etc/alertmanager/alertmanager.example.yml
           image=$(docker compose --env-file deploy/.env.example -f deploy/compose.yaml config --no-interpolate --format json |
             python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["blackbox-exporter"]["image"])')
           docker run --rm \
@@ -110,8 +119,12 @@ jobs:
           CFG
 
       - name: Copy deploy/
-        # .env и данные на сервере не трогаем
-        run: rsync -az --delete --exclude .env --exclude 'backups/' deploy/ vps:$APP_DIR/
+        run: |
+          if ! ssh vps "test -s $APP_DIR/backups/alertmanager/alertmanager.yml && test -s $APP_DIR/backups/alertmanager/postbox.key"; then
+            echo '::error::Install the Alertmanager configuration and Postbox key on the VPS before deploying.'
+            exit 1
+          fi
+          rsync -az --delete --exclude .env --exclude 'backups/' deploy/ vps:$APP_DIR/
 
       - name: Pull and up
         run: |
@@ -120,6 +133,7 @@ jobs:
             test -f .env || { echo 'нет $APP_DIR/.env, скопируйте из .env.example'; exit 1; }
             python3 monitoring-prepare.py
             docker compose pull --quiet
+            docker compose run --rm --no-deps --entrypoint /bin/sh alertmanager -ec 'test -r /etc/alertmanager/postbox.key && /bin/amtool check-config /etc/alertmanager/alertmanager.yml'
             # Сначала Postgres и роли/БД проектов: init-скрипт сам по себе выполняется
             # только на пустом volume, а новые проекты добавляются на живой сервер.
             docker compose up -d --wait postgres
@@ -127,8 +141,9 @@ jobs:
             docker compose run --rm --no-deps --entrypoint /bin/promtool prometheus check config /etc/prometheus/prometheus.yml
             docker compose run --rm --no-deps blackbox-exporter --config.file=/etc/blackbox/blackbox.yml --config.check
             docker compose up -d --remove-orphans
-            docker compose up -d --wait --wait-timeout 120 node-exporter blackbox-exporter
+            docker compose up -d --wait --wait-timeout 120 node-exporter blackbox-exporter alertmanager
             docker compose kill -s SIGHUP blackbox-exporter
+            docker compose kill -s SIGHUP alertmanager
             docker compose up -d --wait --wait-timeout 120 prometheus
             # Каталог конфигурации видит файлы после rsync; HTTP lifecycle API не открываем.
             docker compose kill -s SIGHUP prometheus

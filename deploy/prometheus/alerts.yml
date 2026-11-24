@@ -1,0 +1,17 @@
+groups:
+  - name: host-alerts
+    rules:
+      - alert: BackupStale
+        expr: >-
+          (time() - givemeanoffer_backup_last_success_timestamp_seconds{job="node-exporter"} >= 30 * 3600)
+          and givemeanoffer_backup_last_success_timestamp_seconds{job="node-exporter"} > 0
+        annotations:
+          summary: С последнего успешного бэкапа прошло 30 часов или больше
+          description: Проверьте журнал backup.sh и внешний снапшот BookReviews.
+
+      - alert: RootDiskSpaceLow
+        expr: node_filesystem_avail_bytes{job="node-exporter",mountpoint="/"} < 3 * 1024^3
+        for: 10m
+        annotations:
+          summary: На корневом разделе осталось меньше 3 ГиБ
+          description: 'Проверьте использование диска {{ $labels.device }}.'

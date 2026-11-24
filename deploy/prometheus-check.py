@@ -13,6 +13,7 @@ import urllib.request
 REQUIRED_PROJECTS = {
     "portfolio", "www", "bookreviews", "foodgram", "http-loadgen", "pvz-service", "billing",
 }
+REQUIRED_ALERTS = {"BackupStale", "RootDiskSpaceLow"}
 
 
 def api(base, path):
@@ -37,7 +38,7 @@ def check(base):
 
     targets = api(base, "targets")["activeTargets"]
     jobs = {target["labels"].get("job") for target in targets}
-    missing = {"prometheus", "pvz", "billing", "node-exporter", "blackbox-exporter", "https"} - jobs
+    missing = {"prometheus", "pvz", "billing", "node-exporter", "blackbox-exporter", "https", "alertmanager"} - jobs
     if missing:
         raise ValueError("Missing targets: " + ", ".join(sorted(missing)))
     failed = [
@@ -51,6 +52,15 @@ def check(base):
     # runtimeinfo отражает результат reload сразу, без ожидания следующего self-scrape.
     if not api(base, "status/runtimeinfo")["reloadConfigSuccess"]:
         raise ValueError("Configuration reload failed")
+
+    managers = api(base, "alertmanagers")["activeAlertmanagers"]
+    if not any(manager["url"] == "http://alertmanager:9093/api/v2/alerts" for manager in managers):
+        raise ValueError("Alertmanager is missing from Prometheus alerting targets")
+    groups = api(base, "rules?type=alert")["groups"]
+    healthy_rules = {rule["name"] for group in groups for rule in group["rules"] if rule["health"] == "ok"}
+    missing = REQUIRED_ALERTS - healthy_rules
+    if missing:
+        raise ValueError("Missing or unhealthy alerts: " + ", ".join(sorted(missing)))
 
     for expression in [
         'pvz_outbox_pending{job="pvz"}',
@@ -70,9 +80,10 @@ def check(base):
         ('node_textfile_scrape_error{job="node-exporter"}', 0),
         ('node_scrape_collector_success{job="node-exporter"}', 1),
         ('blackbox_exporter_config_last_reload_successful{job="blackbox-exporter"}', 1),
+        ('alertmanager_config_last_reload_successful{job="alertmanager"}', 1),
     ]:
         if any(float(sample["value"][1]) != expected for sample in query(base, expression)):
-            raise ValueError("Exporter check failed for " + expression)
+            raise ValueError("Monitoring check failed for " + expression)
 
     for metric, threshold in [("probe_success", 1), ("probe_ssl_earliest_cert_expiry", time.time())]:
         results = query(base, metric + '{job="https"}')
@@ -84,7 +95,7 @@ def check(base):
         if failed:
             raise ValueError("HTTPS or certificate check failed for " + ", ".join(sorted(failed)))
 
-    print(f"Prometheus OK. All {len(targets)} targets up. App, host, HTTPS and backup metrics present.")
+    print(f"Prometheus OK. All {len(targets)} targets up. Required metrics and alert rules present.")
 
 
 def main():

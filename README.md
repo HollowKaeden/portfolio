@@ -240,16 +240,19 @@ ssh -N -L 127.0.0.1:19090:127.0.0.1:9090 deploy@<IP_сервера>
 cd /opt/givemeanoffer
 python3 monitoring-prepare.py
 docker compose run --rm --no-deps blackbox-exporter --config.file=/etc/blackbox/blackbox.yml --config.check
+docker compose run --rm --no-deps --entrypoint /bin/amtool alertmanager check-config /etc/alertmanager/alertmanager.yml
 docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
-docker compose up -d --wait node-exporter blackbox-exporter prometheus
+docker compose up -d --wait node-exporter blackbox-exporter alertmanager prometheus
 docker compose kill -s SIGHUP blackbox-exporter
+docker compose kill -s SIGHUP alertmanager
 docker compose kill -s SIGHUP prometheus
 python3 prometheus-check.py
 ```
 
-Проверка ждёт до 120 секунд. Prometheus должен быть готов, все 12 целей должны иметь `up=1`,
+Проверка ждёт до 120 секунд. Prometheus должен быть готов, все 13 целей должны иметь `up=1`,
 конфигурация должна успешно загрузиться, а метрики приложений, хоста и бэкапа должны поступать.
 Для всех семи HTTPS-целей дополнительно проверяются `probe_success=1` и срок сертификата.
+Проверяется подключение Alertmanager и вычисление обоих правил алертинга.
 Изменения параметров контейнера в `compose.yaml` применяются обычным деплоем через `up -d`.
 
 Примеры PromQL для приложений.
@@ -324,6 +327,30 @@ node_textfile_scrape_error
 
 Регрессионные тесты запускаются в Linux командой `python3 -m unittest discover -s tests -v`.
 Они исполняют `backup.sh` с подставным Docker в отдельном временном каталоге.
+
+### Алерты хоста и бэкапа
+
+`BackupStale` срабатывает через 30 часов после последнего зарегистрированного успешного бэкапа.
+Нулевая метрика на чистой установке означает, что успешный запуск ещё не наблюдался.
+`RootDiskSpaceLow` срабатывает, если на корневом разделе 10 минут подряд доступно меньше 3 ГиБ.
+Alertmanager отправляет письмо при срабатывании и восстановлении, а длительный инцидент напоминает
+раз в 24 часа. Для недоступности сайта и BookReviews используются отдельные внешние проверки UptimeRobot.
+
+Перед первым деплоем создайте в [Yandex Cloud Postbox](https://yandex.cloud/ru/docs/postbox/quickstart)
+адрес с подтверждённым DNS доменом, отдельный сервисный аккаунт с ролью `postbox.sender` и API-ключ
+с областью `yc.postbox.send`. Подготовьте на сервере каталог `/opt/givemeanoffer/backups/alertmanager/`
+внутри закрытого каталога `backups/` с правами `0700`.
+
+- `alertmanager.yml` создаётся по [примеру](deploy/alertmanager/alertmanager.example.yml).
+  Укажите `smtp_from` на подтверждённом домене, идентификатор API-ключа в `smtp_auth_username`
+  и адрес получателя в `to`.
+- `postbox.key` содержит секретную часть API-ключа. Закрытый родительский каталог ограничивает доступ на хосте.
+  Смонтированные файлы должны быть доступны для чтения пользователю контейнера. Внутри контейнера
+  `auth_password_file` указывает на отдельный файл ключа, SMTP использует TLS на порту 465.
+
+`rsync` сохраняет этот каталог. Alertmanager работает в сети `monitoring` и хранит историю доставки
+в отдельном volume. При ротации ключа обновите его идентификатор и файл секрета, проверьте конфигурацию
+через `amtool`, затем отправьте Alertmanager `SIGHUP` как показано выше.
 
 ### Бэкапы
 

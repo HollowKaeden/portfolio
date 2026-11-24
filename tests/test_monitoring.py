@@ -207,14 +207,20 @@ class DeploymentCheckTests(unittest.TestCase):
             for project in projects
         ]
         self.overrides = {}
-        jobs = ["prometheus", "pvz", "billing", "node-exporter", "blackbox-exporter", "https"]
+        jobs = ["prometheus", "pvz", "billing", "node-exporter", "blackbox-exporter", "https", "alertmanager"]
         self.targets = [{"labels": {"job": job}, "health": "up"} for job in jobs]
+        self.managers = [{"url": "http://alertmanager:9093/api/v2/alerts"}]
+        self.rules = [{"name": name, "health": "ok"} for name in ("BackupStale", "RootDiskSpaceLow")]
 
     def api(self, base, path):
         if path == "targets":
             return {"activeTargets": self.targets}
         if path == "status/runtimeinfo":
             return {"reloadConfigSuccess": True}
+        if path == "alertmanagers":
+            return {"activeAlertmanagers": self.managers}
+        if path == "rules?type=alert":
+            return {"groups": [{"rules": self.rules}]}
         raise AssertionError(path)
 
     def query(self, base, expression):
@@ -252,11 +258,21 @@ class DeploymentCheckTests(unittest.TestCase):
             ('node_textfile_scrape_error{job="node-exporter"}', "1"),
             ('node_scrape_collector_success{job="node-exporter"}', "0"),
             ('blackbox_exporter_config_last_reload_successful{job="blackbox-exporter"}', "0"),
+            ('alertmanager_config_last_reload_successful{job="alertmanager"}', "0"),
         ]:
             with self.subTest(expression=expression):
                 self.overrides = {expression: [{"metric": {}, "value": [0, value]}]}
-                with self.assertRaisesRegex(ValueError, "Exporter check failed"):
+                with self.assertRaisesRegex(ValueError, "Monitoring check failed"):
                     self.run_check()
+
+    def test_scrape_success_does_not_hide_broken_alerting(self):
+        self.run_check()
+        self.rules[0]["health"] = "err"
+        with self.assertRaisesRegex(ValueError, "Missing or unhealthy alerts: BackupStale"):
+            self.run_check()
+        self.managers.clear()
+        with self.assertRaisesRegex(ValueError, "Alertmanager is missing from Prometheus alerting targets"):
+            self.run_check()
 
 
 if __name__ == "__main__":

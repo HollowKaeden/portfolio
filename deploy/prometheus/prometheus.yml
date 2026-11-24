@@ -11,6 +11,14 @@ storage:
       time: 7d
       size: 512MB
 
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
@@ -27,6 +35,9 @@ scrape_configs:
   - job_name: blackbox-exporter
     static_configs:
       - targets: ["blackbox-exporter:9115"]
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
   - job_name: https
     scrape_interval: 60s
     scrape_timeout: 10s

@@ -1,0 +1,58 @@
+rule_files: [/etc/prometheus/alerts.yml]
+evaluation_interval: 1m
+
+tests:
+  - name: Backup age and recovery
+    interval: 5m
+    input_series:
+      - series: 'givemeanoffer_backup_last_success_timestamp_seconds{job="node-exporter"}'
+        values: '3600x372 111900'
+    alert_rule_test:
+      - eval_time: 30h55m
+        alertname: BackupStale
+        exp_alerts: []
+      - eval_time: 31h
+        alertname: BackupStale
+        exp_alerts:
+          - exp_labels: {job: node-exporter}
+            exp_annotations:
+              summary: С последнего успешного бэкапа прошло 30 часов или больше
+              description: Проверьте журнал backup.sh и внешний снапшот BookReviews.
+      - eval_time: 31h5m
+        alertname: BackupStale
+        exp_alerts: []
+
+  - name: First backup has not been recorded
+    interval: 1h
+    input_series:
+      - series: 'givemeanoffer_backup_last_success_timestamp_seconds{job="node-exporter"}'
+        values: '0x31'
+    alert_rule_test:
+      - eval_time: 31h
+        alertname: BackupStale
+        exp_alerts: []
+
+  - name: Sustained root disk pressure and recovery
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{job="node-exporter",mountpoint="/",device="/dev/vda1"}'
+        values: '3221225472 3221225471x9 3221225472 3221225471x10 3221225472'
+      - series: 'node_filesystem_avail_bytes{job="node-exporter",mountpoint="/other",device="/dev/vdb1"}'
+        values: '0x23'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RootDiskSpaceLow
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: RootDiskSpaceLow
+        exp_alerts: []
+      - eval_time: 22m
+        alertname: RootDiskSpaceLow
+        exp_alerts:
+          - exp_labels: {job: node-exporter, mountpoint: /, device: /dev/vda1}
+            exp_annotations:
+              summary: На корневом разделе осталось меньше 3 ГиБ
+              description: Проверьте использование диска /dev/vda1.
+      - eval_time: 23m
+        alertname: RootDiskSpaceLow
+        exp_alerts: []
