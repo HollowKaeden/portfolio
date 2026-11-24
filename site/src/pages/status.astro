@@ -1,0 +1,182 @@
+---
+import Card from '../components/Card.astro';
+import Layout from '../layouts/Layout.astro';
+import { getProjects, getSite, projectPath } from '../lib/content';
+
+const [projects, { status }] = await Promise.all([getProjects(), getSite()]);
+const monitored = status.projects.map((slug) => {
+  const project = projects.find((item) => item.slug === slug);
+  if (!project) throw new Error(`Неизвестный проект на странице статуса ${slug}`);
+  return project;
+});
+---
+
+<Layout title={status.title} description={status.description}>
+  <Card aria-labelledby="status-title">
+    <div class="intro">
+      <a class="back" href="/">← {status.back}</a>
+      <h1 id="status-title">{status.title}</h1>
+      <p>{status.description}</p>
+    </div>
+  </Card>
+
+  <status-overview
+    data-available={status.available}
+    data-unavailable={status.unavailable}
+    data-unknown={status.unknown}
+    data-unit={status.unit}
+  >
+    <ul class="checks" aria-label={status.title}>
+      {monitored.map((project) => (
+        <li class="check" data-project={project.slug}>
+          <div class="check-header">
+            <h2><a href={projectPath(project.slug)}>{project.title}</a></h2>
+            <p class="check-value"><output class="duration"></output><span class="state">{status.unknown}</span></p>
+          </div>
+          <figure class="history" hidden>
+            <div class="plot">
+              <svg viewBox="0 0 480 56" preserveAspectRatio="none" aria-hidden="true">
+                <path class="grid" d="M0 1H480 M0 28H480 M0 55H480" />
+                <path class="series" />
+              </svg>
+              <span class="scale"></span>
+            </div>
+            <figcaption><span>{status.historyStart}</span><span>{status.historyEnd}</span></figcaption>
+          </figure>
+        </li>
+      ))}
+    </ul>
+    <p class="updated" hidden>{status.updated} <time></time></p>
+  </status-overview>
+</Layout>
+
+<script>
+  import '../lib/status-client';
+</script>
+
+<style>
+  .intro {
+    display: grid;
+    gap: 10px;
+  }
+
+  .back {
+    justify-self: start;
+    font: var(--text-sub);
+  }
+
+  h1 {
+    margin-top: 4px;
+    font: 500 28px / 1.1 var(--font-mono);
+  }
+
+  .intro p {
+    color: #525252;
+    font: var(--text-sub);
+  }
+
+  .checks {
+    display: grid;
+    gap: 8px;
+  }
+
+  .check {
+    background: var(--color-surface);
+    border-radius: var(--card-radius);
+    padding: 13px var(--card-pad-x) 10px;
+  }
+
+  .check-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+  }
+
+  h2 {
+    font: var(--text-nav);
+  }
+
+  .check-value {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font: var(--text-caption);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .duration:empty {
+    display: none;
+  }
+
+  .state {
+    color: #555;
+    padding: 5px 7px;
+    border-radius: 5px;
+    background: #f0f0f0;
+  }
+
+  .check[data-state='available'] .state {
+    background: #e6f3ed;
+    color: #176244;
+  }
+
+  .check[data-state='unavailable'] .state {
+    background: #fae9e8;
+    color: #932c2a;
+  }
+
+  .history {
+    margin: 9px 0 0;
+    color: #585858;
+    font: var(--text-caption);
+  }
+
+  .plot {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 6px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: 45px;
+  }
+
+  .grid {
+    stroke: var(--color-frame);
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .series {
+    fill: none;
+    stroke: #237452;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .scale {
+    min-width: 48px;
+    text-align: right;
+  }
+
+  figcaption {
+    display: flex;
+    justify-content: space-between;
+    margin: 5px 54px 0 0;
+  }
+
+  .updated {
+    margin-top: 11px;
+    color: #c4c4c4;
+    text-align: right;
+    font: var(--text-caption);
+  }
+</style>

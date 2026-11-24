@@ -16,7 +16,7 @@ const link = z.object({
 });
 
 const site = defineCollection({
-  loader: section((doc) => [{ id: 'site', meta: doc.meta, profile: doc.profile }]),
+  loader: section((doc) => [{ id: 'site', meta: doc.meta, profile: doc.profile, status: doc.status }]),
   schema: z.object({
     meta: z.object({
       title: z.string(),
@@ -29,6 +29,20 @@ const site = defineCollection({
           alt: z.string(),
         })
         .optional(),
+    }),
+    status: z.object({
+      title: z.string(),
+      link: z.string(),
+      back: z.string(),
+      description: z.string(),
+      updated: z.string(),
+      available: z.string(),
+      unavailable: z.string(),
+      unknown: z.string(),
+      historyStart: z.string(),
+      historyEnd: z.string(),
+      unit: z.string(),
+      projects: z.array(z.string()).min(1),
     }),
     profile: z.object({
       name: z.string(),

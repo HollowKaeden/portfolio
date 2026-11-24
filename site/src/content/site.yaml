@@ -25,6 +25,20 @@ profile:
     - { label: Telegram, url: https://t.me/BlessNT }
     - { label: Резюме, url: /resume.pdf }
 
+status:
+  title: Статус проектов
+  link: Статус
+  back: На главную
+  description: Время HTTPS-проверки с VPS. На графиках за 24 часа показано среднее за каждые 15 минут.
+  updated: Обновлено
+  available: Доступен
+  unavailable: Недоступен
+  unknown: Нет свежих данных
+  historyStart: 24 ч назад
+  historyEnd: Сейчас
+  unit: мс
+  projects: [portfolio, bookreviews, foodgram, pvz-service, http-loadgen]
+
 # preview: скриншот 16:10 над названием на странице проекта; thumb: квадрат в списке.
 # Оба необязательны, файлы лежат в src/assets/projects/, пути относительно этого файла.
 projects:

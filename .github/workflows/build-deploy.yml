@@ -147,6 +147,8 @@ jobs:
             docker compose up -d --wait --wait-timeout 120 prometheus
             # Каталог конфигурации видит файлы после rsync; HTTP lifecycle API не открываем.
             docker compose kill -s SIGHUP prometheus
+            docker compose restart status-exporter
+            docker compose up -d --wait --wait-timeout 120 status-exporter
             # Caddyfile мог поменяться без пересоздания контейнера
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
             # loadgen-web читает targets.json только при старте (max_rps мог поменяться)
@@ -164,6 +166,8 @@ jobs:
             echo "FAIL $1 → $code (ожидали $2)"; return 1
           }
           check "https://$DOMAIN/" 200
+          check "https://$DOMAIN/status/" 200
+          check "https://$DOMAIN/status/data.json" 200
           check "https://www.$DOMAIN/" 301
           check "https://books.$DOMAIN/health" 200
           check "https://books.$DOMAIN/ready" 200   # заодно проверяет связь с БД

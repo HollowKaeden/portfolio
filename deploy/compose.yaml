@@ -24,6 +24,7 @@ services:
     volumes:
       # папка, а не файл: при замене файла rsync-ом bind-mount файла показывал бы старую версию
       - ./caddy:/etc/caddy:ro
+      - status_data:/srv/status:ro
       - caddy_data:/data
       - caddy_config:/config
     # cgroup достигал прежних 128m; оставляем запас поверх Go runtime.
@@ -261,6 +262,26 @@ services:
     networks:
       - monitoring
 
+  status-exporter:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command: ["python", "-u", "/opt/status/export.py"]
+    volumes:
+      - ./status:/opt/status:ro
+      - status_data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,time; assert 0 <= time.time()-json.load(open('/data/data.json'))['generated_at'] <= 180"]
+      interval: 30s
+      timeout: 5s
+      start_period: 70s
+      retries: 3
+    mem_limit: 48m
+    networks:
+      - monitoring
+
   alertmanager:
     image: prom/alertmanager:v0.35.0
     restart: unless-stopped
@@ -394,6 +415,7 @@ volumes:
   postgres_data: # БД всех проектов, в бэкапе
   kafka_data: # журнал демо: сутки хранения, в бэкап не входит
   prometheus_data: # история метрик; 7 дней / целевой размер 512MB, в бэкап не входит
+  status_data: # публичная сводка HTTPS-проверок, пересоздаётся из Prometheus
   alertmanager_data: # история доставки и дедупликация уведомлений
   bookreviews_uploads: # обложки книг, в бэкапе
   foodgram_media: # картинки рецептов и аватары; каждую ночь сбрасываются к эталону (foodgram-reset.sh)
